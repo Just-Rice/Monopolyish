@@ -1125,3 +1125,10 @@ canvas.die { border-radius: 8px; box-shadow: 0 3px 12px rgba(0,0,0,0.4); }
   color: #86e5ac; margin-left: 8px;
 }
 .mp-badge.off { background: rgba(231,76,60,0.14); border-color: rgba(231,76,60,0.4); color: #ff9b90; }
+
+.lobby-diag {
+  margin-top: 14px;
+  font: 400 0.74rem/1.6 ui-monospace, 'SF Mono', Menlo, monospace;
+  color: #6e7f99;
+  word-break: break-word;
+}

@@ -14,6 +14,17 @@
     return r ? r.value : 'local';
   }
 
+  /* A running account of what the connection is doing. Silence was the worst
+     part of a failed join — you could not tell a wrong code from a network
+     that would not route. */
+  var diagLines = [];
+  function diag(line) {
+    diagLines.push(line);
+    if (diagLines.length > 6) diagLines.shift();
+    var n = el('lobby-diag');
+    if (n) n.textContent = diagLines.join('  ·  ');
+  }
+
   function status(text, isError) {
     var n = el('lobby-status');
     if (!n) return;
@@ -160,12 +171,12 @@
 
     MP.loadPeerJS().then(function () {
       var code = ChowkaNet.makeRoomCode(5);
-      var peer = new Peer(ChowkaNet.ROOM_PREFIX + code, { debug: 0 });
+      var peer = new Peer(ChowkaNet.ROOM_PREFIX + code, { debug: 0, config: ChowkaNet.ICE });
       MP.peer = peer;
       MP.roomCode = code;
 
       peer.on('open', function () {
-        MP.transport = ChowkaNet.createPeerTransport({ peer: peer });
+        MP.transport = ChowkaNet.createPeerTransport({ peer: peer, onDiag: diag });
         MP.host = ChowkaNet.createHost({
           transport: MP.transport,
           game: hostAdapter(),
@@ -202,12 +213,19 @@
     el('btn-start-online').style.display = 'none';
 
     MP.loadPeerJS().then(function () {
-      var peer = new Peer(undefined, { debug: 0 });
+      var peer = new Peer(undefined, { debug: 0, config: ChowkaNet.ICE });
       MP.peer = peer;
 
       peer.on('open', function (id) {
         MP.myId = id;
-        var transport = ChowkaNet.createPeerTransport({ peer: peer });
+        var transport = ChowkaNet.createPeerTransport({
+          peer: peer, onDiag: diag,
+          onIceFailed: function () {
+            status('Your two networks cannot reach each other directly, and the ' +
+                   'relay did not answer. Try again, or put one device on a ' +
+                   'different network.', true);
+          }
+        });
         MP.transport = transport;
         MP.guest = ChowkaNet.createGuest({
           transport: transport,
