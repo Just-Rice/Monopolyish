@@ -32,6 +32,11 @@ class UI {
 
   // ── Update all UI panels ─────────────────────────────────
   updateAll() {
+    // The host is the only one that changes anything, so this is the single
+    // place the rest of the table hears about it.
+    if (typeof MP !== 'undefined' && MP.mode === 'host') {
+      setTimeout(() => MP.publish(this.game), 0);
+    }
     this.updatePlayerPanels();
     this.updateCurrentPlayerPanel();
     this.updateActionButtons();

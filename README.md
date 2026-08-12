@@ -22,9 +22,12 @@ open index.html
 ## Structure
 
 ```
-index.html        markup only, ~150 lines
+index.html        markup only
 css/style.css     the whole stylesheet
 js/
+  net.js          the online protocol, transport-agnostic
+  online.js       snapshots, the guest mirror, intents, prompt routing
+  lobby.js        room codes, seats, ready checks
   property.js     board layout, colour groups, rent and building rules
   player.js       player creation, tokens, colours, net worth
   cards.js        Chance and Community Chest decks
@@ -34,7 +37,8 @@ js/
   ui.js           panels, toasts and modals
   game.js         the Game class: turn flow
   setup.js        the setup screen
-test/             headless smoke test, run with ./test/run.sh
+test/             two headless suites, run with ./test/run.sh
+vendor/peerjs.min.js
 ```
 
 The module boundaries are the ones the original author marked in comments
@@ -51,7 +55,7 @@ runs offline too, just with fallback typefaces.
 ./test/run.sh
 ```
 
-A headless harness stubs enough DOM for the game to load under JavaScriptCore,
+`smoke-test.js` stubs enough DOM for the game to load under JavaScriptCore,
 then checks the board is 40 spaces with 22 properties, that every property has a
 price and a rising six-step rent table in a known colour group, that both card
 decks are intact, that the shuffle preserves and actually shuffles the deck, and
@@ -59,6 +63,36 @@ that the AI, UI and Game classes all load.
 
 It reads whichever layout `index.html` points at, so the same numbers before and
 after a refactor mean the refactor was clean.
+
+`online-test.js` drives the online layer over an in-memory transport: that a
+snapshot carries money, positions, jail state, property ownership and houses
+without shipping the board layout; that the guest mirror only lets you act on
+your own turn; that intents out of turn or out of phase are refused; and that a
+prompt for a remote seat is sent to that peer, answered there, and resolved back
+here — with duplicate and unknown replies ignored.
+
+Neither suite proves two real browsers connect, and the host-only modal flows
+are not covered.
+
+## Online play
+
+Pick **Host online** on the setup screen and you get a five-character room code.
+Friends pick **Join online**, type the code, take a seat and mark themselves
+ready. Any seat nobody claims is played by the computer.
+
+The host's browser runs the one real game. Guests receive a snapshot of it after
+every change and render a mirror, then send intents for their own turn — so two
+boards cannot drift apart. Game traffic goes directly browser-to-browser over
+WebRTC; the only outside service involved introduces the two browsers to each
+other.
+
+**Routed to remote players:** rolling, ending a turn, building, selling,
+mortgaging, and the buy-or-auction, jail and card prompts.
+
+**Still resolved on the host:** auction bidding, trades, and raising funds during
+bankruptcy. Those are live multi-round flows rather than single questions, and
+they are left until the foundation has been play-tested. Each is marked in the
+source with `MP.hostOnlyPrompt(...)`.
 
 ## Versions
 

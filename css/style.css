@@ -1030,3 +1030,98 @@ canvas.die { border-radius: 8px; box-shadow: 0 3px 12px rgba(0,0,0,0.4); }
   #right-panel { display: none; }
   #board-grid { min-width: 400px; min-height: 400px; }
 }
+
+/* ============================================================
+   ONLINE PLAY — lobby, room code, seats
+   ============================================================ */
+.mp-modes { gap: 8px; flex-wrap: wrap; }
+.mp-mode { cursor: pointer; }
+.mp-mode input { margin-right: 6px; }
+
+.mp-code-input {
+  width: 100%;
+  padding: 14px 16px;
+  border-radius: 10px;
+  border: 2px solid rgba(255,255,255,0.16);
+  background: rgba(0,0,0,0.35);
+  color: #fff;
+  font: 700 1.3rem/1 'Outfit', system-ui, sans-serif;
+  letter-spacing: 0.35em;
+  text-align: center;
+  text-transform: uppercase;
+}
+.mp-code-input::placeholder { letter-spacing: 0.2em; opacity: 0.35; }
+
+#lobby-screen, #mp-pause {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+}
+#mp-pause { position: fixed; inset: 0; background: rgba(6,10,22,0.9); z-index: 900; }
+
+.lobby-card {
+  width: min(520px, 100%);
+  background: linear-gradient(160deg, #182034, #0e1524);
+  border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 18px;
+  padding: 28px;
+  box-shadow: 0 30px 70px -30px rgba(0,0,0,0.9);
+}
+.lobby-title { font-family: 'Outfit', sans-serif; font-weight: 800; margin-bottom: 6px; }
+.lobby-status { color: #9fb0c9; margin-bottom: 18px; font-size: 0.95rem; }
+.lobby-status.error { color: #ff7a6b; font-weight: 600; }
+.lobby-label {
+  font-size: 0.72rem; letter-spacing: 0.14em; text-transform: uppercase;
+  color: #7d8ca6; margin: 16px 0 8px;
+}
+.lobby-hint { font-size: 0.82rem; color: #8496b0; margin-top: 8px; }
+
+.room-code {
+  font: 800 clamp(1.9rem, 8vw, 2.8rem)/1 'Outfit', monospace;
+  letter-spacing: 0.24em; text-indent: 0.24em;
+  text-align: center; padding: 16px 10px;
+  background: rgba(0,0,0,0.4); border-radius: 12px;
+  color: #f5c542; user-select: all;
+}
+
+.seat-row {
+  display: flex; align-items: center; gap: 10px;
+  padding: 11px 14px; margin-bottom: 8px;
+  border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 12px; background: rgba(255,255,255,0.04);
+  font-size: 0.92rem;
+}
+.seat-row.mine { border-color: #f5c542; box-shadow: 0 0 0 1px rgba(245,197,66,0.35); }
+.seat-dot { width: 13px; height: 13px; border-radius: 50%; flex: 0 0 auto; }
+.seat-who { margin-left: auto; color: #93a4bd; font-size: 0.85rem; }
+.seat-btn {
+  border: none; border-radius: 8px; padding: 7px 13px;
+  background: #f5c542; color: #1a1408; font-weight: 700; font-size: 0.8rem; cursor: pointer;
+}
+.seat-btn.ghost { background: transparent; color: #cfe0f5; border: 1px solid rgba(255,255,255,0.2); }
+.seat-tag {
+  font-size: 0.75rem; padding: 3px 10px; border-radius: 999px;
+  border: 1px solid rgba(255,255,255,0.16); color: #93a4bd;
+}
+.seat-tag.yes { background: #2ecc71; border-color: #2ecc71; color: #06240f; }
+.seat-row select {
+  font: inherit; font-size: 0.82rem; padding: 5px 8px; border-radius: 8px;
+  background: rgba(0,0,0,0.35); color: #dce7f5; border: 1px solid rgba(255,255,255,0.16);
+}
+
+.btn-lobby-back {
+  display: block; width: 100%; margin-top: 10px; padding: 12px;
+  background: transparent; color: #cfe0f5;
+  border: 1px solid rgba(255,255,255,0.18); border-radius: 12px;
+  font: 600 0.95rem 'Outfit', sans-serif; cursor: pointer;
+}
+
+.mp-badge {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: 0.72rem; padding: 3px 10px; border-radius: 999px;
+  background: rgba(46,204,113,0.14); border: 1px solid rgba(46,204,113,0.4);
+  color: #86e5ac; margin-left: 8px;
+}
+.mp-badge.off { background: rgba(231,76,60,0.14); border-color: rgba(231,76,60,0.4); color: #ff9b90; }

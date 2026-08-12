@@ -55,8 +55,14 @@ class Game {
     });
 
     // Button handlers
-    document.getElementById('btn-roll').addEventListener('click', () => this.handleRoll());
-    document.getElementById('btn-end-turn').addEventListener('click', () => this.endTurn());
+    document.getElementById('btn-roll').addEventListener('click', () => {
+      if (MP.mode === 'guest') return MP.send({ kind: 'roll' });
+      this.handleRoll();
+    });
+    document.getElementById('btn-end-turn').addEventListener('click', () => {
+      if (MP.mode === 'guest') return MP.send({ kind: 'endTurn' });
+      this.endTurn();
+    });
     document.getElementById('btn-build').addEventListener('click', () => this.showBuildMenu());
     document.getElementById('btn-trade').addEventListener('click', () => this.ui.showTradeModal());
 
@@ -459,20 +465,20 @@ class Game {
           // AI sends to auction
           this.ui.showToast(`🤖 ${player.name} declines to buy ${space.name}.`, 'info');
           this.ui.addGameLog(`🤖 ${player.name} passed on ${space.name}`);
-          this.ui.showAuctionModal(spaceId);
+          MP.hostOnlyPrompt('auction bidding'); this.ui.showAuctionModal(spaceId);
         }
       } else {
-        this.ui.showBuyModal(
-          spaceId,
-          () => {
-            this.purchaseProperty(playerId, spaceId, space.price);
-            this.phase = this.lastRoll?.doubles ? 'roll' : 'action';
-            this.ui.updateAll();
-          },
-          () => {
-            this.ui.showAuctionModal(spaceId);
-          }
-        );
+        // Whoever landed here answers, wherever they happen to be sitting.
+        const doBuy = () => {
+          this.purchaseProperty(playerId, spaceId, space.price);
+          this.phase = this.lastRoll?.doubles ? 'roll' : 'action';
+          this.ui.updateAll();
+        };
+        const doAuction = () => { MP.hostOnlyPrompt('auction bidding'); this.ui.showAuctionModal(spaceId); };
+        MP.prompt(player.id, 'buy', { spaceId }, {
+          local: () => this.ui.showBuyModal(spaceId, doBuy, doAuction),
+          onReply: (answer) => (answer === 'buy' ? doBuy() : doAuction())
+        });
       }
     } else if (prop.owner === playerId) {
       // Own it
@@ -557,33 +563,36 @@ class Game {
 
   handleJailOptions() {
     const player = this.players[this.currentPlayer];
-    this.ui.showJailModal(
-      player,
-      // Pay $50
-      () => {
-        this.payMoney(this.currentPlayer, 50, 'Jail fine');
-        player.inJail = false;
-        player.jailTurns = 0;
-        this.phase = 'roll';
-        this.ui.updateAll();
-        this.ui.showToast(`${player.name} paid $50 fine and is free!`, 'success');
-      },
-      // Use card
-      () => {
-        const card = player.jailCards.pop();
-        returnJailCard(this.decks, card.deckType);
-        player.inJail = false;
-        player.jailTurns = 0;
-        this.phase = 'roll';
-        this.ui.updateAll();
-        this.ui.showToast(`${player.name} used Get Out of Jail Free card!`, 'success');
-      },
-      // Roll for doubles
-      () => {
-        this.phase = 'roll';
-        this.ui.updateAll();
+    // Whoever is in jail answers, wherever they are sitting.
+    const payFine = () => {
+      this.payMoney(this.currentPlayer, 50, 'Jail fine');
+      player.inJail = false;
+      player.jailTurns = 0;
+      this.phase = 'roll';
+      this.ui.updateAll();
+      this.ui.showToast(`${player.name} paid $50 fine and is free!`, 'success');
+    };
+    const useJailCard = () => {
+      const card = player.jailCards.pop();
+      returnJailCard(this.decks, card.deckType);
+      player.inJail = false;
+      player.jailTurns = 0;
+      this.phase = 'roll';
+      this.ui.updateAll();
+      this.ui.showToast(`${player.name} used Get Out of Jail Free card!`, 'success');
+    };
+    const rollForIt = () => {
+      this.phase = 'roll';
+      this.ui.updateAll();
+    };
+    MP.prompt(playerId, 'jail', { playerId }, {
+      local: () => this.ui.showJailModal(player, payFine, useJailCard, rollForIt),
+      onReply: (answer) => {
+        if (answer === 'pay') payFine();
+        else if (answer === 'card') useJailCard();
+        else rollForIt();
       }
-    );
+    });
   }
 
   // ── Money Transactions ───────────────────────────────────
@@ -609,7 +618,7 @@ class Game {
         // Has enough assets — show raise funds modal
         this._pendingDebt = { playerId, amount, creditorId: -1, reason };
         this.phase = 'debt';
-        this.ui.showRaiseFundsModal(playerId, amount, -1, reason);
+        MP.hostOnlyPrompt('raising funds'); this.ui.showRaiseFundsModal(playerId, amount, -1, reason);
       }
     }
   }
@@ -633,7 +642,7 @@ class Game {
         // Has enough assets — show raise funds modal
         this._pendingDebt = { playerId: payerId, amount, creditorId: receiverId, reason: `Rent to ${receiver.name}` };
         this.phase = 'debt';
-        this.ui.showRaiseFundsModal(payerId, amount, receiverId, `Rent to ${receiver.name}`);
+        MP.hostOnlyPrompt('raising funds'); this.ui.showRaiseFundsModal(payerId, amount, receiverId, `Rent to ${receiver.name}`);
       }
     }
   }
@@ -685,7 +694,7 @@ class Game {
       } else {
         this._pendingDebt = { playerId, amount, creditorId: -1, reason: 'Tax payment' };
         this.phase = 'debt';
-        this.ui.showRaiseFundsModal(playerId, amount, -1, 'Tax payment');
+        MP.hostOnlyPrompt('raising funds'); this.ui.showRaiseFundsModal(playerId, amount, -1, 'Tax payment');
       }
     }
   }

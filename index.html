@@ -34,6 +34,20 @@
       <span>Spectator Mode — sit back and watch the AIs battle it out!</span>
     </div>
 
+    <div class="setup-options mp-modes">
+      <label class="toggle-option mp-mode"><input type="radio" name="mp-mode" value="local" checked>
+        <span class="toggle-label">🖥️ This device</span></label>
+      <label class="toggle-option mp-mode"><input type="radio" name="mp-mode" value="host">
+        <span class="toggle-label">🌐 Host online</span></label>
+      <label class="toggle-option mp-mode"><input type="radio" name="mp-mode" value="join">
+        <span class="toggle-label">🔗 Join online</span></label>
+    </div>
+
+    <div class="setup-options" id="join-row" style="display:none">
+      <input id="join-code" class="mp-code-input" maxlength="9" placeholder="ROOM CODE"
+             autocomplete="off" spellcheck="false">
+    </div>
+
     <div class="setup-options">
       <label class="toggle-option">
         <span class="toggle-label">🅿️ Free Parking Pot</span>
@@ -46,6 +60,36 @@
     </div>
 
     <button class="btn-start" id="btn-start-game">🎲 Start Game</button>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════════════════════
+     LOBBY (ONLINE)
+══════════════════════════════════════════════════════════ -->
+<div id="lobby-screen" style="display:none">
+  <div class="lobby-card">
+    <h2 class="lobby-title">Online game</h2>
+    <p class="lobby-status" id="lobby-status">Connecting…</p>
+
+    <div id="code-box" style="display:none">
+      <div class="lobby-label">Room code</div>
+      <div class="room-code" id="room-code"></div>
+      <p class="lobby-hint">Send this to your friends. They pick <b>Join online</b> and type it in.</p>
+    </div>
+
+    <div class="lobby-label">Seats</div>
+    <div id="seat-list"></div>
+
+    <button class="btn-start" id="btn-start-online" style="display:none">Start game</button>
+    <button class="btn-lobby-back" id="btn-lobby-back">Back</button>
+  </div>
+</div>
+
+<div id="mp-pause" style="display:none">
+  <div class="lobby-card">
+    <h2 class="lobby-title">Connection lost</h2>
+    <p class="lobby-status" id="mp-pause-note"></p>
+    <button class="btn-lobby-back" id="mp-pause-leave">Leave game</button>
   </div>
 </div>
 
@@ -146,7 +190,10 @@
 <script src="js/ai.js"></script>
 <script src="js/ui.js"></script>
 <script src="js/game.js"></script>
+<script src="js/net.js"></script>
+<script src="js/online.js"></script>
 <script src="js/setup.js"></script>
+<script src="js/lobby.js"></script>
 
 </body>
 </html>
