@@ -9,9 +9,12 @@
 (function () {
 
   function el(id) { return document.getElementById(id); }
+  /* 'person' or 'online', and within online, 'host' or 'join'. */
+  var tab = 'person';
+  var onlineChoice = 'host';
   function mode() {
-    var r = document.querySelector('input[name="mp-mode"]:checked');
-    return r ? r.value : 'local';
+    if (tab === 'person') return 'local';
+    return onlineChoice;
   }
 
   /* A running account of what the connection is doing. Silence was the worst
@@ -98,7 +101,7 @@
         }
 
       } else if (MP.mode === 'host') {
-        who.textContent = 'Waiting…';
+        who.textContent = MP.config.seatKinds[seat.id] === 'cpu' ? '' : 'Waiting…';
         row.appendChild(who);
         var sel = document.createElement('select');
         [['open', 'Open to a friend'], ['cpu', 'Computer']].forEach(function (o) {
@@ -181,8 +184,10 @@
       var peer = new Peer(ChowkaNet.ROOM_PREFIX + code, { debug: 0, config: ChowkaNet.ICE });
       MP.peer = peer;
       MP.roomCode = code;
+      var opened = false;      // has this room ever come up?
 
       peer.on('open', function () {
+        opened = true;
         MP.transport = ChowkaNet.createPeerTransport({ peer: peer, onDiag: diag });
         MP.host = ChowkaNet.createHost({
           transport: MP.transport,
@@ -201,9 +206,17 @@
       });
 
       peer.on('error', function (err) {
+        // A code clash before the room exists just means picking another one.
+        // Afterwards the same error means the signalling server still holds
+        // our old session while we reconnect — re-hosting there would mint a
+        // fresh code and cut loose everybody already in the room.
         if (err && err.type === 'unavailable-id') {
-          try { peer.destroy(); } catch (e) {}
-          return startHosting();
+          if (!opened) {
+            try { peer.destroy(); } catch (e) {}
+            return startHosting();
+          }
+          diag('signalling still holds the old session — retrying');
+          return;
         }
         status(MP.peerError(err), true);
       });
@@ -285,6 +298,10 @@
         : (name || seatName(seatId) || 'A player') +
           ' dropped out. They can rejoin with the same room code.';
     }
+    // The host is not stuck: they can reopen the lobby and carry on without
+    // whoever left, or wait for them to come back.
+    var cont = el('mp-pause-continue');
+    if (cont) cont.style.display = (MP.mode === 'host' && !hostGone) ? '' : 'none';
     el('mp-pause').style.display = '';
   }
 
@@ -299,20 +316,33 @@
   /* ------------------------------------------------------------- wiring -- */
 
   document.addEventListener('DOMContentLoaded', function () {
-    Array.prototype.forEach.call(
-      document.querySelectorAll('input[name="mp-mode"]'),
-      function (r) {
-        r.addEventListener('change', function () {
-          el('join-row').style.display = (mode() === 'join') ? '' : 'none';
-          var btn = el('btn-start-game');
-          if (btn) {
-            btn.textContent = mode() === 'host' ? '🌐 Open a room'
-                            : mode() === 'join' ? '🔗 Join room'
-                            : '🎲 Start Game';
-          }
-        });
-      }
-    );
+    function selectTab(which) {
+      tab = which;
+      el('tab-person').classList.toggle('active', which === 'person');
+      el('tab-online').classList.toggle('active', which === 'online');
+      el('tab-person').setAttribute('aria-selected', String(which === 'person'));
+      el('tab-online').setAttribute('aria-selected', String(which === 'online'));
+      el('panel-person').hidden = which !== 'person';
+      el('panel-online').hidden = which !== 'online';
+    }
+    el('tab-person').addEventListener('click', function () { selectTab('person'); });
+    el('tab-online').addEventListener('click', function () { selectTab('online'); });
+
+    function selectOnline(which) {
+      onlineChoice = which;
+      el('opt-host').classList.toggle('active', which === 'host');
+      el('opt-join').classList.toggle('active', which === 'join');
+      el('join-row').hidden = which !== 'join';
+      el('online-note').textContent = which === 'host'
+        ? "The settings above apply to the game you host. Seats you don't fill " +
+          'are played by the computer.'
+        : 'The host chooses the board and the number of players — you just take ' +
+          'a seat.';
+      el('btn-start-online-mode').textContent =
+        which === 'host' ? '🌐 Open a room' : '🔗 Join room';
+    }
+    el('opt-host').addEventListener('click', function () { selectOnline('host'); });
+    el('opt-join').addEventListener('click', function () { selectOnline('join'); });
 
     var codeInput = el('join-code');
     if (codeInput) {
@@ -321,20 +351,15 @@
       });
     }
 
-    /* The existing Start Game button keeps its local behaviour; online modes
-       intercept it before that handler runs. */
-    var start = el('btn-start-game');
-    if (start) {
-      start.addEventListener('click', function (e) {
-        var m = mode();
-        if (m === 'local') return;
-        e.stopImmediatePropagation();
-        e.preventDefault();
-        if (m === 'host') return startHosting();
+    /* Each tab has its own button now, so nothing needs intercepting. */
+    var goOnline = el('btn-start-online-mode');
+    if (goOnline) {
+      goOnline.addEventListener('click', function () {
+        if (onlineChoice === 'host') return startHosting();
         var code = ChowkaNet.normaliseRoomCode(el('join-code').value);
         if (code.length < 4) { el('join-code').focus(); return; }
         startJoining(code);
-      }, true);   // capture, so it runs before the local start handler
+      });
     }
 
     var startOnline = el('btn-start-online');
@@ -365,6 +390,18 @@
       if (MP.peer) { try { MP.peer.destroy(); } catch (e) {} }
       location.reload();
     });
+    var cont = el('mp-pause-continue');
+    if (cont) cont.addEventListener('click', function () {
+      el('mp-pause').style.display = 'none';
+      MP.pausedSeat = null;
+      showScreen('lobby-screen');
+      if (MP.host) {
+        MP.host.pushSeats();
+        renderSeats(MP.host.seats());
+      }
+      status('Back in the lobby. Their seat is open again — start when ready.');
+    });
+
     var leave = el('mp-pause-leave');
     if (leave) leave.addEventListener('click', function () {
       if (MP.peer) { try { MP.peer.destroy(); } catch (e) {} }

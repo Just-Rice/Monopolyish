@@ -18,6 +18,11 @@
     <h1 class="setup-title">MONOPOLY</h1>
     <p class="setup-subtitle">Classic Edition · 2–4 Players</p>
 
+    <div class="setup-tabs" role="tablist">
+      <button class="setup-tab active" id="tab-person" role="tab" aria-selected="true">🎩 Play in person</button>
+      <button class="setup-tab" id="tab-online" role="tab" aria-selected="false">🌐 Play online</button>
+    </div>
+
     <p style="color: var(--text-muted); font-size: 0.85rem; margin-bottom: 12px;">Select number of players:</p>
     <div class="setup-player-count">
       <button class="count-btn" id="count-2" data-count="2">2</button>
@@ -34,20 +39,6 @@
       <span>Spectator Mode — sit back and watch the AIs battle it out!</span>
     </div>
 
-    <div class="setup-options mp-modes">
-      <label class="toggle-option mp-mode"><input type="radio" name="mp-mode" value="local" checked>
-        <span class="toggle-label">🖥️ This device</span></label>
-      <label class="toggle-option mp-mode"><input type="radio" name="mp-mode" value="host">
-        <span class="toggle-label">🌐 Host online</span></label>
-      <label class="toggle-option mp-mode"><input type="radio" name="mp-mode" value="join">
-        <span class="toggle-label">🔗 Join online</span></label>
-    </div>
-
-    <div class="setup-options" id="join-row" style="display:none">
-      <input id="join-code" class="mp-code-input" maxlength="9" placeholder="ROOM CODE"
-             autocomplete="off" spellcheck="false">
-    </div>
-
     <div class="setup-options">
       <label class="toggle-option">
         <span class="toggle-label">🅿️ Free Parking Pot</span>
@@ -59,7 +50,34 @@
       </label>
     </div>
 
-    <button class="btn-start" id="btn-start-game">🎲 Start Game</button>
+    <div class="setup-panel" id="panel-person">
+      <button class="btn-start" id="btn-start-game">🎲 Start Game</button>
+    </div>
+
+    <div class="setup-panel" id="panel-online" hidden>
+      <div class="online-choice">
+        <button class="online-opt active" id="opt-host">
+          <span class="online-opt-title">Host a game</span>
+          <span class="online-opt-sub">Get a room code and invite friends</span>
+        </button>
+        <button class="online-opt" id="opt-join">
+          <span class="online-opt-title">Join a game</span>
+          <span class="online-opt-sub">Enter a code someone sent you</span>
+        </button>
+      </div>
+
+      <div id="join-row" hidden>
+        <input id="join-code" class="mp-code-input" maxlength="9" placeholder="ROOM CODE"
+               autocomplete="off" spellcheck="false">
+      </div>
+
+      <p class="online-note" id="online-note">
+        The settings above apply to the game you host. Seats you don't fill are
+        played by the computer.
+      </p>
+
+      <button class="btn-start" id="btn-start-online-mode">🌐 Open a room</button>
+    </div>
   </div>
 </div>
 
@@ -91,7 +109,10 @@
   <div class="lobby-card">
     <h2 class="lobby-title">Connection lost</h2>
     <p class="lobby-status" id="mp-pause-note"></p>
-    <button class="btn-lobby-back" id="mp-pause-leave">Leave game</button>
+    <div class="pause-actions">
+      <button class="seat-btn" id="mp-pause-continue" style="display:none">Back to the lobby</button>
+      <button class="btn-lobby-back" id="mp-pause-leave">Leave game</button>
+    </div>
   </div>
 </div>
 

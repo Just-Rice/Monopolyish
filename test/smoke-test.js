@@ -55,6 +55,16 @@ Object.defineProperty(El.prototype, 'className', {
     String(v).split(/\s+/).forEach(function (c) { if (c) this.classList.set[c] = true; }, this);
   }
 });
+/* The board builder sets innerHTML then reads firstElementChild off it. The
+   stub does not parse HTML, so hand back a stand-in element instead of
+   undefined — otherwise the harness fails on its own limitation. */
+Object.defineProperty(El.prototype, 'firstElementChild', {
+  get: function () {
+    if (this.children.length) return this.children[0];
+    if (this._innerHTML) return new El('div');
+    return null;
+  }
+});
 El.prototype.appendChild = function (c) { this.children.push(c); c.parentNode = this; return c; };
 El.prototype.removeChild = function (c) {
   this.children = this.children.filter(function (x) { return x !== c; });
@@ -72,6 +82,24 @@ El.prototype.querySelector = function () { return new El('div'); };
 El.prototype.querySelectorAll = function () { return []; };
 El.prototype.getAttribute = function (k) { return this.dataset[k] || null; };
 El.prototype.setAttribute = function (k, v) { this.dataset[k] = v; };
+/* Dice faces are drawn on a canvas. */
+El.prototype.getContext = function () {
+  var noop = function () {};
+  var ctx = {
+    canvas: this, fillStyle: '', strokeStyle: '', lineWidth: 1, font: '',
+    textAlign: '', textBaseline: '', globalAlpha: 1, shadowBlur: 0, shadowColor: ''
+  };
+  ['clearRect','fillRect','strokeRect','beginPath','closePath','moveTo','lineTo',
+   'arc','arcTo','ellipse','rect','fill','stroke','save','restore','translate',
+   'scale','rotate','fillText','strokeText','setTransform','drawImage','clip',
+   'setLineDash','quadraticCurveTo','bezierCurveTo','roundRect']
+    .forEach(function (m) { ctx[m] = noop; });
+  ctx.createLinearGradient = ctx.createRadialGradient = function () {
+    return { addColorStop: noop };
+  };
+  ctx.measureText = function (t) { return { width: String(t).length * 7 }; };
+  return ctx;
+};
 El.prototype.getBoundingClientRect = function () {
   return { left: 0, top: 0, width: 400, height: 400 };
 };
@@ -256,6 +284,21 @@ check('the Game class loaded', typeof Game === 'function');
 check('startLocalGame is reachable from other files',
       typeof G.startLocalGame === 'function', typeof G.startLocalGame);
 check('the online layer loaded', G.MP && typeof G.MP.snapshot === 'function');
+
+/* ------------------------------------------------- starting a game ------ */
+
+/* The online lobby calls startLocalGame directly. If that throws, the host
+   silently stays in the lobby and the game never begins — which is exactly
+   what was reported. */
+if (typeof G.startLocalGame === 'function') {
+  try {
+    G.startLocalGame();
+    check('startLocalGame runs without throwing', true);
+  } catch (e) {
+    fails.push('startLocalGame threw: ' + (e.message || e) +
+               (e.stack ? ' @ ' + String(e.stack).split('\n')[0] : ''));
+  }
+}
 
 /* ------------------------------------------------------------- report -- */
 
