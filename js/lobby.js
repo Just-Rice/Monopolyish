@@ -146,6 +146,13 @@
 
   /* -------------------------------------------------------------- host -- */
 
+  /* setup.js declares `let game`, which lives in the script scope rather than
+     on window — so window.game was always undefined and every snapshot came
+     back empty. Read the binding itself, guarding the temporal dead zone. */
+  function liveGame() {
+    try { return game; } catch (e) { return null; }
+  }
+
   function hostAdapter() {
     return {
       getSeats: function () {
@@ -153,9 +160,9 @@
           return { id: i, nameKey: seatName(i), kind: kind };
         });
       },
-      getSnapshot: function () { return MP.snapshot(window.game); },
+      getSnapshot: function () { return MP.snapshot(liveGame()); },
       applyIntent: function (seatId, intent) {
-        return MP.applyIntent(seatId, intent, window.game);
+        return MP.applyIntent(seatId, intent, liveGame());
       }
     };
   }
@@ -347,9 +354,9 @@
         }
 
         showScreen('game-screen');
-        el('btn-start-game').click();      // hand over to the normal start path
+        startLocalGame();                 // build the game directly, no re-entry
         MP.host.pushSeats();
-        MP.publish(window.game);
+        MP.publish(liveGame());
       });
     }
 

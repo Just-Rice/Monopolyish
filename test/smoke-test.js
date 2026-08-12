@@ -148,7 +148,8 @@ try {
     'return {' +
     ['BOARD_SPACES','COLOR_GROUPS','CHANCE_CARDS','COMMUNITY_CHEST_CARDS',
      'ALL_TOKENS','TOKENS','PLAYER_COLORS','shuffleDeck','createDecks',
-     'calculateRent','ownsFullGroup','getGroupSpaces','AIPlayer','UI','Game']
+     'calculateRent','ownsFullGroup','getGroupSpaces','AIPlayer','UI','Game',
+     'startLocalGame','MP']
       .map(function (n) {
         return n + ': typeof ' + n + ' !== "undefined" ? ' + n + ' : undefined';
       }).join(',') +
@@ -248,6 +249,13 @@ if (typeof createDecks === 'function') {
 check('the AI class loaded', typeof AIPlayer === 'function');
 check('the UI class loaded', typeof UI === 'function');
 check('the Game class loaded', typeof Game === 'function');
+
+/* The online lobby starts the game by calling this directly. Synthesising a
+   click on the button instead re-entered the online handler and re-hosted the
+   room, dropping everybody already in it. */
+check('startLocalGame is reachable from other files',
+      typeof G.startLocalGame === 'function', typeof G.startLocalGame);
+check('the online layer loaded', G.MP && typeof G.MP.snapshot === 'function');
 
 /* ------------------------------------------------------------- report -- */
 

@@ -212,7 +212,10 @@
   renderPlayerInputs(playerCount);
 
   // Start game
-  document.getElementById('btn-start-game').addEventListener('click', () => {
+  /* Building the game is its own function so the online lobby can start it
+     directly. Synthesising a click on the button re-entered the online
+     handler and re-hosted the room, which dropped everybody already in it. */
+  function startLocalGame() {
     const names = [];
     const tokens = [];
     const aiConfigs = [];
@@ -251,7 +254,9 @@
     }
     updateParkingPot();
     window._game = game;
-  });
+  }
+
+  document.getElementById('btn-start-game').addEventListener('click', startLocalGame);
 
   // ── Parking Pot live update ──────────────────────────────
   function updateParkingPot() {
