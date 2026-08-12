@@ -270,9 +270,17 @@
     var name = opts.name || "Guest";
     var mySeat = null;
     var TIMEOUT = opts.timeout || 7000;
+    // Reaching the host the first time means signalling plus ICE, which
+    // routinely takes longer than the liveness timeout. So the "have they gone
+    // quiet" check only arms once we have actually heard from them; until then
+    // a separate, much longer budget covers "could not connect at all".
+    var CONNECT_TIMEOUT = opts.connectTimeout || 25000;
     var now = opts.now || function () { return Date.now(); };
+    var startedAt = now();
     var hostLastSeen = now();
+    var everHeard = false;
     var hostLost = false;
+    var gaveUp = false;
 
     transport.onPeerJoin(function () {
       transport.broadcast({ t: M.HELLO, name: name });
@@ -281,6 +289,7 @@
     transport.onMessage(function (peerId, msg) {
       if (!msg) return;
       hostLastSeen = now();
+      everHeard = true;
       if (hostLost) {
         hostLost = false;
         if (opts.onHostBack) opts.onHostBack();
@@ -354,11 +363,26 @@
       tick: function (at) {
         at = at === undefined ? now() : at;
         transport.broadcast({ t: M.PING });
+
+        if (!everHeard) {
+          // Never connected. This is a failure to arrive, not a disconnection,
+          // and it deserves a different message.
+          if (!gaveUp && at - startedAt > CONNECT_TIMEOUT) {
+            gaveUp = true;
+            if (opts.onConnectFailed) opts.onConnectFailed();
+          }
+          return;
+        }
+
         if (!hostLost && at - hostLastSeen > TIMEOUT) {
           hostLost = true;
           if (opts.onHostLost) opts.onHostLost();
         }
-      }
+      },
+
+      /* Exposed so the interface can tell "still connecting" from "was
+         connected and lost them". */
+      hasConnected: function () { return everHeard; }
     };
   }
 

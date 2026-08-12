@@ -213,6 +213,42 @@ check('the answer reaches the host', replies.length === 1 && replies[0].answer =
       JSON.stringify(replies));
 check('the answer is matched to its question', replies[0].id === 7);
 
+/* ------------------------------------ slow to connect is not a disconnect -- */
+
+/* The bug this guards: a guest declared the host missing after seven seconds,
+   counted from when its own peer opened rather than from first contact. Across
+   two devices, signalling plus ICE takes longer than that, so joining a room
+   reported "the host dropped out" before it had ever connected. */
+var net2 = Net.createFakeNetwork({ schedule: schedule });
+var h2 = net2.endpoint('H2'), q2 = net2.endpoint('Q2');
+Net.createHost({
+  transport: h2,
+  game: { getSeats: function () { return [{ id: 0, kind: 'local' }]; },
+          getSnapshot: function () { return null; },
+          applyIntent: function () { return false; } }
+});
+var clock = Date.now(), lost = 0, failed = 0;
+var slow = Net.createGuest({
+  transport: q2, name: 'Slow', selfPeerId: 'Q2',
+  timeout: 7000, connectTimeout: 25000,
+  now: function () { return clock; },
+  onHostLost: function () { lost++; },
+  onConnectFailed: function () { failed++; }
+});
+
+check('a guest that has not connected knows it', slow.hasConnected() === false);
+for (var i = 0; i < 5; i++) { clock += 2000; slow.tick(clock); pump(); }
+check('ten seconds of connecting is not a drop-out', lost === 0, lost + ' calls');
+check('and is not yet a failure either', failed === 0, failed + ' calls');
+
+net2.connect('H2', 'Q2');
+pump();
+check('first contact is recorded', slow.hasConnected() === true);
+
+clock += 20000;
+slow.tick(clock);
+check('after connecting, silence does mean the host is gone', lost === 1, lost + ' calls');
+
 /* ------------------------------------------------------------ report ---- */
 
 print('');

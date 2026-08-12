@@ -227,7 +227,11 @@
           onReject: function (reason) { status(reason, true); },
           onPaused: onDropped,
           onResumed: onReturned,
-          onHostLost: function () { onDropped(null, 'The host'); },
+          onHostLost: function () { onDropped('host'); },
+          onConnectFailed: function () {
+            status("Couldn't reach that room. Check the code, and that the host " +
+                   'still has the page open.', true);
+          },
           onHostBack: function () { onReturned(null); }
         });
         transport.connectTo(ChowkaNet.ROOM_PREFIX + code);
@@ -241,21 +245,27 @@
   /* ---------------------------------------------------- drops and joins -- */
 
   function onDropped(seatId, name) {
-    MP.pausedSeat = seatId === undefined ? null : seatId;
-    if (MP.mode === 'host' && seatId !== null && seatId !== undefined) {
+    var hostGone = seatId === 'host';
+    MP.pausedSeat = hostGone ? null : (seatId === undefined ? null : seatId);
+
+    if (MP.mode === 'host' && !hostGone && seatId !== null && seatId !== undefined) {
       MP.config.seatKinds[seatId] = 'open';   // let them walk back into it
     }
+
     var note = el('mp-pause-note');
     if (note) {
-      note.textContent = (name || seatName(seatId) || 'A player') +
-        ' dropped out. They can rejoin with the same room code.';
+      note.textContent = hostGone
+        ? 'Lost contact with the host. The game cannot continue without them — ' +
+          'if they come back, rejoin with the same room code.'
+        : (name || seatName(seatId) || 'A player') +
+          ' dropped out. They can rejoin with the same room code.';
     }
     el('mp-pause').style.display = '';
   }
 
   function onReturned(seatId) {
     MP.pausedSeat = null;
-    if (MP.mode === 'host' && seatId !== null && seatId !== undefined) {
+    if (MP.mode === 'host' && seatId !== null && seatId !== undefined && seatId !== 'host') {
       MP.config.seatKinds[seatId] = 'remote';
     }
     el('mp-pause').style.display = 'none';
