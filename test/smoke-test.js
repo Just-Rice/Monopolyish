@@ -300,6 +300,74 @@ if (typeof G.startLocalGame === 'function') {
   }
 }
 
+/* ------------------------------------------------ money and the AI ------ */
+
+/* Built directly rather than through the lobby, so the checks below are about
+   the rules and not about the screen. */
+if (typeof G.Game === 'function') {
+  var g = new G.Game(['A', 'B'], ['car', 'hat']);
+
+  /* A property changes hands for money in exactly one place, so that is where
+     the money has to be checked. The AI asked before calling and the local
+     modal only drew a Buy button when the player could afford it — but an
+     answer arriving from another device was taken as given. */
+  var buyer = g.players[0];
+  var priced = -1;
+  for (var i = 0; i < G.BOARD_SPACES.length; i++) {
+    if (G.BOARD_SPACES[i].type === 'property' && G.BOARD_SPACES[i].price > 0) { priced = i; break; }
+  }
+  check('the board has something to buy', priced >= 0);
+
+  var price = G.BOARD_SPACES[priced].price;
+  buyer.money = price - 1;
+  var owned = buyer.properties.length;
+  var bought = g.purchaseProperty(0, priced, price);
+  check('a purchase you cannot afford is refused', bought === false, String(bought));
+  check('and costs nothing', buyer.money === price - 1, String(buyer.money));
+  check('and hands over nothing', buyer.properties.length === owned &&
+        g.state.properties[priced].owner === null);
+
+  buyer.money = price;
+  check('one you can afford goes through', g.purchaseProperty(0, priced, price) === true);
+  check('and is paid for', buyer.money === 0, String(buyer.money));
+  check('and is yours', g.state.properties[priced].owner === 0);
+
+  /* The flag that stops two AI turns overlapping used to be cleared by hand at
+     each exit, so anything that threw left it set and every later AI turn
+     became a silent no-op — the computer stopped playing for good. */
+  var g2 = new G.Game(['A', 'B'], ['car', 'hat']);
+  g2._playAITurn = function () { throw new Error('deliberate'); };
+  g2.runAITurn();
+  check('a failed AI turn does not keep the lock',
+        g2._aiRunning === false, String(g2._aiRunning));
+
+  var ran = 0;
+  var g3 = new G.Game(['A', 'B'], ['car', 'hat']);
+  g3._playAITurn = function () { ran++; return Promise.resolve(ran < 3); };
+  g3.runAITurn();
+  drainMicrotasks();
+  check('doubles go round again instead of re-entering', ran === 3, String(ran));
+  check('and the lock is released at the end', g3._aiRunning === false);
+
+  /* Collect-from-everyone cards used to take whatever a player happened to have
+     and leave them solvent on paper, short-changing whoever drew the card. */
+  var collectors = (G.COMMUNITY_CHEST_CARDS || []).filter(function (c) {
+    return /Collect \$\d+ from every player/i.test(c.text);
+  });
+  check('the collect-from-everyone cards are still there', collectors.length === 2,
+        String(collectors.length));
+  collectors.forEach(function (card) {
+    var g4 = new G.Game(['A', 'B'], ['car', 'hat']);
+    var asked = [];
+    g4.payRent = function (from, to, amount) { asked.push([from, to, amount]); };
+    g4.currentPlayer = 0;
+    card.action(g4);
+    check('"' + card.text.slice(0, 24) + '…" bills through the debt system',
+          asked.length === 1 && asked[0][0] === 1 && asked[0][1] === 0 && asked[0][2] > 0,
+          JSON.stringify(asked));
+  });
+}
+
 /* ------------------------------------------------------------- report -- */
 
 print('');

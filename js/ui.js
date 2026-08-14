@@ -447,12 +447,24 @@ class UI {
 
       if (!passed.has(bidder.id)) {
         document.getElementById('bid-submit')?.addEventListener('click', () => {
-          const amt = parseInt(document.getElementById('bid-amount').value);
-          if (amt > highestBid && amt <= bidder.money) {
-            highestBid = amt;
-            highestBidder = bidder.id;
-            advance();
+          const amt = parseInt(document.getElementById('bid-amount').value, 10);
+          // A bid that cannot stand says why. Silently doing nothing makes a
+          // working button look broken, which is worse than a refusal.
+          if (!Number.isFinite(amt)) {
+            this.showToast('Enter an amount to bid.', 'warning');
+            return;
           }
+          if (amt <= highestBid) {
+            this.showToast(`Bid more than $${highestBid.toLocaleString()} to take the lead.`, 'warning');
+            return;
+          }
+          if (amt > bidder.money) {
+            this.showToast(`${bidder.name} only has $${bidder.money.toLocaleString()}.`, 'warning');
+            return;
+          }
+          highestBid = amt;
+          highestBidder = bidder.id;
+          advance();
         });
         document.getElementById('bid-pass')?.addEventListener('click', () => {
           passed.add(bidder.id);

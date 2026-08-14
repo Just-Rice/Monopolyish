@@ -170,12 +170,13 @@ const COMMUNITY_CHEST_CARDS = [
     id: 'cc7',
     text: 'Grand Opera Night. Collect $50 from every player.',
     action: (game) => {
+      // Through payRent, not around it: a player who cannot cover this has to
+      // raise funds or go bankrupt, exactly as they would for rent. Taking
+      // whatever they happened to have left them solvent on paper and quietly
+      // short-changed whoever drew the card.
+      const owed = 50;
       const activePlayers = game.players.filter((p, i) => !p.bankrupt && i !== game.currentPlayer);
-      activePlayers.forEach(p => {
-        const amt = Math.min(50, p.money);
-        p.money -= amt;
-        game.players[game.currentPlayer].money += amt;
-      });
+      activePlayers.forEach(p => game.payRent(p.id, game.currentPlayer, owed));
       game.ui.updateAll();
     }
   },
@@ -193,12 +194,13 @@ const COMMUNITY_CHEST_CARDS = [
     id: 'cc10',
     text: 'It is your birthday. Collect $10 from every player.',
     action: (game) => {
+      // Through payRent, not around it: a player who cannot cover this has to
+      // raise funds or go bankrupt, exactly as they would for rent. Taking
+      // whatever they happened to have left them solvent on paper and quietly
+      // short-changed whoever drew the card.
+      const owed = 10;
       const activePlayers = game.players.filter((p, i) => !p.bankrupt && i !== game.currentPlayer);
-      activePlayers.forEach(p => {
-        const amt = Math.min(10, p.money);
-        p.money -= amt;
-        game.players[game.currentPlayer].money += amt;
-      });
+      activePlayers.forEach(p => game.payRent(p.id, game.currentPlayer, owed));
       game.ui.updateAll();
     }
   },

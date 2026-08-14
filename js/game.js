@@ -72,7 +72,7 @@ class Game {
 
     // If the first player is AI, start their turn
     if (this.isCurrentPlayerAI()) {
-      setTimeout(() => this.runAITurn(), 1000);
+      setTimeout(() => this.runAITurn(), 1000);   // wrapper catches its own
     }
   }
 
@@ -98,13 +98,39 @@ class Game {
   }
 
   // ── AI Auto-play ────────────────────────────────────────
+  /* The flag that stops two AI turns overlapping used to be cleared by hand at
+     each of six exits. Anything that threw in between left it set for good, and
+     the guard at the top then made every later AI turn a silent no-op — the
+     computer simply stopped playing and nothing said why. It is now released in
+     a finally, so no path can keep it.
+
+     Rolling doubles used to re-enter by calling this method again, which is why
+     the flag had to be dropped before the call. That is a loop instead: the
+     flag is held for the whole run and the turn asks to go round again. */
   async runAITurn() {
     if (this._aiRunning) return;
     this._aiRunning = true;
+    try {
+      let again = true;
+      // Three doubles sends you to jail, so this ends on its own; the count is
+      // insurance against a state that says otherwise.
+      for (let turns = 0; again && turns < 8; turns++) {
+        again = await this._playAITurn();
+      }
+    } catch (err) {
+      if (window.console) console.error('[monopolyish] the AI turn failed', err);
+      this.ui.showToast('The computer hit a problem and skipped its turn.', 'error');
+      try { if (this.canEndTurn()) this.endTurn(); } catch (e) {}
+    } finally {
+      this._aiRunning = false;
+    }
+  }
 
+  /* One AI turn. Returns true if it earned another. */
+  async _playAITurn() {
     const player = this.players[this.currentPlayer];
     const ai = this.getAI(this.currentPlayer);
-    if (!ai || player.bankrupt) { this._aiRunning = false; return; }
+    if (!ai || player.bankrupt) return false;
 
     this.ui.showToast(`🤖 ${player.name} is thinking...`, 'info');
     await this._wait(ai._delay());
@@ -154,7 +180,7 @@ class Game {
     }
 
     // If bankrupt, stop
-    if (player.bankrupt) { this._aiRunning = false; return; }
+    if (player.bankrupt) return false;
 
     // Building phase: decide to build houses
     if (this.phase === 'action' || this.phase === 'rolled') {
@@ -170,16 +196,14 @@ class Game {
     // End turn
     await this._wait(300);
     if (this.canEndTurn()) {
-      this._aiRunning = false;
       this.endTurn();
-    } else if (this.phase === 'roll' && this.lastRoll?.doubles && !player.inJail) {
-      // Doubles — roll again
-      this._aiRunning = false;
-      await this._wait(500);
-      this.runAITurn();
-    } else {
-      this._aiRunning = false;
+      return false;
     }
+    if (this.phase === 'roll' && this.lastRoll?.doubles && !player.inJail) {
+      await this._wait(500);
+      return true;                     // doubles: round again
+    }
+    return false;
   }
 
   async _aiRaiseFunds() {
@@ -470,7 +494,9 @@ class Game {
       } else {
         // Whoever landed here answers, wherever they happen to be sitting.
         const doBuy = () => {
-          this.purchaseProperty(playerId, spaceId, space.price);
+          // If they cannot pay, the property goes to auction rather than the
+          // turn stopping on a purchase that did not happen.
+          if (!this.purchaseProperty(playerId, spaceId, space.price)) return doAuction();
           this.phase = this.lastRoll?.doubles ? 'roll' : 'action';
           this.ui.updateAll();
         };
@@ -714,15 +740,29 @@ class Game {
   }
 
   // ── Property ─────────────────────────────────────────────
+  /* The only way a property changes hands for money, and therefore the only
+     sensible place to ask whether the money is there. It used to ask nowhere:
+     the AI checked before calling and the local modal only drew a Buy button
+     when the player could afford it, but an answer arriving from another device
+     was taken as given — so a guest could buy anything and go quietly into a
+     negative balance, without the debt and bankruptcy machinery ever running. */
   purchaseProperty(playerId, spaceId, price) {
     const player = this.players[playerId];
     const space = BOARD_SPACES[spaceId];
+
+    if (player.money < price) {
+      this.ui.showToast(`${player.name} cannot afford ${space.name}.`, 'error');
+      this.ui.addGameLog(`${player.name} could not afford ${space.name} ($${price})`);
+      return false;
+    }
+
     player.money -= price;
     player.properties.push(spaceId);
     this.state.properties[spaceId].owner = playerId;
     this.ui.showToast(`${player.name} bought ${space.name} for $${price}!`, 'success');
     this.ui.addGameLog(`🏠 ${player.name} bought ${space.name} for $${price}`);
     this.ui.updateAll();
+    return true;
   }
 
   buildHouse(spaceId) {
