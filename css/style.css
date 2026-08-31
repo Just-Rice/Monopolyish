@@ -1360,3 +1360,8 @@ details[open] > .house-rules-summary::before { content: '▾ '; }
   }
   .player-token.hop { animation: none !important; }
 }
+
+/* The end-of-game table has ten columns; 520px is a deed card's width, not a
+   scoreboard's. It still scrolls sideways on a narrow screen. */
+#modal-content:has(.gameover-modal) { max-width: 860px; }
+#modal-content:has(.trade-modal) { max-width: 720px; }

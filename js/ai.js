@@ -375,7 +375,11 @@ class AIPlayer {
       cost += this._propertyWorth(id, game, this.playerId);
       if (this._completesGroupFor(id, partnerId, game)) {
         handsOverAMonopoly = true;
-        cost += 1.5 * this._propertyWorth(id, game, partnerId);
+        /* What it costs to complete somebody's set is most of what the set is
+           worth to them — enough that it takes a serious offer, not so much
+           that the deed is simply not for sale. A hard player refuses outright
+           below, which is where "not for sale" belongs. */
+        cost += 0.9 * this._propertyWorth(id, game, partnerId);
       }
     });
 
