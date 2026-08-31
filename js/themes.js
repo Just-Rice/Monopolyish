@@ -81,11 +81,20 @@ const BOARD_THEMES = {
   }
 };
 
+/* Which theme is in force. The board is drawn after the theme is chosen, so
+   the middle of it has to be able to ask rather than be told. */
+let activeThemeKey = 'classic';
+
+function activeBoardTheme() {
+  return BOARD_THEMES[activeThemeKey] || BOARD_THEMES.classic;
+}
+
 /* Renaming happens in place, because everything else already holds references
    into BOARD_SPACES. The first call records the original names so switching
    back to classic — or between two themes — never compounds. */
 function applyBoardTheme(key) {
   const theme = BOARD_THEMES[key] || BOARD_THEMES.classic;
+  activeThemeKey = BOARD_THEMES[key] ? key : 'classic';
 
   BOARD_SPACES.forEach(space => {
     if (space.baseName === undefined) space.baseName = space.name;

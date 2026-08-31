@@ -125,7 +125,7 @@ function renderBoard(container) {
   center.className = 'board-center-area';
   center.style.gridColumn = '2 / 11';
   center.style.gridRow = '2 / 11';
-  const theme = (typeof BOARD_THEMES !== 'undefined' && BOARD_THEMES.classic) || null;
+  const theme = (typeof activeBoardTheme === 'function' && activeBoardTheme()) || null;
   center.innerHTML = `
     <div class="board-center">
       <div class="board-logo">🎩</div>

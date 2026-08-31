@@ -206,7 +206,8 @@ try {
      'calculateRent','ownsFullGroup','getGroupSpaces','AIPlayer','UI','Game',
      'startLocalGame','MP','canBuildHouse','canSellHouse','rollDice',
      'Save','BOARD_THEMES','applyBoardTheme','boardThemeKeys',
-     'AI_PERSONALITIES','aiPersonalityKeys','getPlayerNetWorth','SFX']
+     'AI_PERSONALITIES','aiPersonalityKeys','getPlayerNetWorth','SFX',
+     'activeBoardTheme']
       .map(function (n) {
         return n + ': typeof ' + n + ' !== "undefined" ? ' + n + ' : undefined';
       }).join(',') +
@@ -943,6 +944,14 @@ if (typeof G.applyBoardTheme === 'function') {
   G.applyBoardTheme('world');
   check('switching themes does not compound', G.BOARD_SPACES[39].name === 'Tokyo',
         G.BOARD_SPACES[39].name);
+  G.applyBoardTheme('london');
+  check('the board knows which theme it is drawing',
+        G.activeBoardTheme().label === 'London', G.activeBoardTheme().label);
+  G.applyBoardTheme('nonsense');
+  check('an unknown theme falls back to the classic board',
+        G.activeBoardTheme().label === 'Atlantic City' &&
+        G.BOARD_SPACES[39].name === 'Boardwalk', G.BOARD_SPACES[39].name);
+
   G.applyBoardTheme('classic');
   check('and going back gives the original names',
         G.BOARD_SPACES.map(function (s) { return s.name; }).join('|') === classicNames.join('|'));
