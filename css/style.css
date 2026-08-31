@@ -1029,10 +1029,35 @@ canvas.die { border-radius: 8px; box-shadow: 0 3px 12px rgba(0,0,0,0.4); }
 ::-webkit-scrollbar-thumb { background: var(--border-bright); border-radius: 2px; }
 ::-webkit-scrollbar-thumb:hover { background: var(--gold-dark); }
 
+/* Narrow screens used to hide the right-hand panel outright — which is where
+   the dice and every button live, so the game became unplayable rather than
+   cramped. The three columns become one, with the board and its controls
+   first and the panels below them. */
 @media (max-width: 900px) {
-  #game-screen { grid-template-columns: 200px 1fr; }
-  #right-panel { display: none; }
-  #board-grid { min-width: 400px; min-height: 400px; }
+  #game-screen.active {
+    grid-template-columns: 1fr;
+    grid-template-rows: auto auto auto;
+    height: auto;
+    min-height: 100vh;
+    overflow-y: auto;
+  }
+  #board-container { order: 1; padding: 8px; overflow: visible; }
+  #board-grid {
+    width: min(calc(100vw - 16px), 92vh);
+    height: min(calc(100vw - 16px), 92vh);
+    min-width: 300px; min-height: 300px;
+  }
+  #right-panel {
+    order: 2; border-left: none; border-top: 1px solid var(--border);
+    overflow: visible;
+  }
+  #left-panel {
+    order: 3; border-right: none; border-top: 1px solid var(--border);
+    overflow: visible;
+  }
+  #game-log-section, #chat-section { height: 200px; }
+  .actions-section .btn { padding: 12px 10px; }   /* thumbs, not pointers */
+  .quick-ref { display: none; }                   /* the rules card can wait */
 }
 
 /* ============================================================
