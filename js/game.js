@@ -661,8 +661,7 @@ class Game {
         this.stats.perPlayer[playerId].taxesPaid += space.amount;
         SFX.play('pay');
         this.payToFreeParkingPot(playerId, space.amount);
-        this.phase = this.lastRoll?.doubles ? 'roll' : 'action';
-        this.ui.updateAll();
+        this._afterAction();
         break;
 
       case 'chance':
@@ -788,8 +787,7 @@ class Game {
       this.payRent(playerId, prop.owner, rent);
 
       if (player.bankrupt) return;
-      this.phase = this.lastRoll?.doubles ? 'roll' : 'action';
-      this.ui.updateAll();
+      this._afterAction();
     }
   }
 
@@ -814,10 +812,9 @@ class Game {
 
     const executeCard = () => {
       card.action(this);
-      if (!this._pendingLandAction) {
-        this.phase = this.lastRoll?.doubles ? 'roll' : 'action';
-        this.ui.updateAll();
-      }
+      // A card that bills more than the player has leaves them in debt, and
+      // that has to survive the card being dismissed.
+      if (!this._pendingLandAction) this._afterAction();
       this._pendingLandAction = false;
     };
 
@@ -835,6 +832,16 @@ class Game {
 
   endLandAction() {
     this._pendingLandAction = false;
+    this._afterAction();
+  }
+
+  /* The turn carries on — unless it cannot. A rent or a tax the player could
+     not cover puts the game in 'debt' and opens the raise-funds modal, and the
+     callers used to stamp 'action' over that on the way back out: the modal
+     stayed up, but the player could roll and end their turn still owing the
+     money. Nothing may leave the debt phase except settling the debt. */
+  _afterAction() {
+    if (this.phase === 'debt') return;
     this.phase = this.lastRoll?.doubles ? 'roll' : 'action';
     this.ui.updateAll();
   }
@@ -963,8 +970,13 @@ class Game {
     MP.prompt(playerId, 'raiseFunds', { playerId, amount, creditorId, reason }, {
       local: () => this.ui.showRaiseFundsModal(playerId, amount, creditorId, reason),
       onReply: (answer) => {
-        if (answer === 'bankrupt') this.forceSettleDebt();
-        else this.resolveDebt();
+        if (answer === 'bankrupt') return this.forceSettleDebt();
+        this.resolveDebt();
+        /* They said pay, but the money was not there. Put the question back to
+           them rather than leaving a debt nobody is being asked about. */
+        if (this._pendingDebt && this._pendingDebt.playerId === playerId) {
+          this.askToRaiseFunds(playerId, amount, creditorId, reason);
+        }
       }
     });
   }

@@ -337,16 +337,20 @@ class UI {
   }
 
   /* Some modals have to survive a fresh snapshot — raising funds is a
-     back-and-forth against a board that keeps changing under it. A sticky
-     modal records how to draw itself again. */
-  setSticky(kind, redraw) {
-    this.sticky = { kind, redraw };
+     back-and-forth against a board that keeps changing under it.
+     What is remembered is which modal it was and what it was about, never a
+     closure: on a guest the whole mirror is replaced by each snapshot, so a
+     captured one would redraw the board as it was two moves ago. */
+  setSticky(kind, args) {
+    this.sticky = { kind, args: args || [] };
   }
 
   redrawSticky() {
-    if (this.sticky && typeof this.sticky.redraw === 'function') {
-      try { this.sticky.redraw(); } catch (e) { this.sticky = null; }
-    }
+    if (!this.sticky) return;
+    const draw = { raiseFunds: 'showRaiseFundsModal' }[this.sticky.kind];
+    if (!draw || typeof this[draw] !== 'function') return;
+    try { this[draw].apply(this, this.sticky.args); }
+    catch (e) { this.sticky = null; }
   }
 
   showPropertyModal(spaceId) {
@@ -721,7 +725,7 @@ class UI {
     };
 
     document.getElementById('modal-overlay').classList.add('active');
-    this.setSticky('raiseFunds', render);
+    this.setSticky('raiseFunds', [playerId, amountOwed, creditorId, reason]);
     render();
   }
 

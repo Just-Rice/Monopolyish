@@ -206,6 +206,9 @@ MP.buildMirror = function (snap) {
     mirror.validateDeal = Game.prototype.validateDeal.bind(mirror);
     mirror.canTrade = Game.prototype.canTrade.bind(mirror);
     mirror.standings = Game.prototype.standings.bind(mirror);
+    /* The build menu is a list of what the rules allow, drawn from state the
+       mirror has; every button on it ends in one of the intents above. */
+    mirror.showBuildMenu = Game.prototype.showBuildMenu.bind(mirror);
   }
 
   mirror.ui = new UI(mirror);
@@ -219,6 +222,10 @@ MP.applySnapshot = function (snap) {
   MP.mirror = MP.buildMirror(snap);
   mpEl('setup-screen').style.display = 'none';
   mpEl('lobby-screen').style.display = 'none';
+  /* The game screen is display:none until it is marked active — clearing the
+     inline style only hands it back to that rule, so a guest's board was in
+     the page but never on the screen. */
+  mpEl('game-screen').classList.add('active');
   mpEl('game-screen').style.display = '';
 
   if (!MP._boardDrawn) {
@@ -229,14 +236,17 @@ MP.applySnapshot = function (snap) {
     } catch (e) { /* board only needs drawing once */ }
   }
 
+  MP.bindGuestControls();
+
   try {
     MP.mirror.ui.updateAll();
     MP.mirror.ui.replaceGameLog(snap.log);
+    MP.mirror.ui.renderRulesInForce();   // the host's house rules, not the defaults
     /* A modal that is a conversation rather than a question — raising funds
        against a debt — has to follow the board it is arguing with. */
     if (sticky) {
       MP.mirror.ui.sticky = sticky;
-      MP.mirror.ui.redrawSticky();
+      MP.mirror.ui.redrawSticky();   // redrawn against the new mirror, not the old
     }
     if (snap.over && !MP._shownGameOver) {
       MP._shownGameOver = true;
@@ -247,6 +257,53 @@ MP.applySnapshot = function (snap) {
     }
   } catch (e) {
     console.error('mirror render failed', e);
+  }
+};
+
+/* The buttons down the side of the board are wired up by Game.init, which a
+   guest never runs — it has no Game, only a mirror of one. So every one of
+   them did nothing at all on a guest. These bind once, to the same mirror
+   methods that turn an action into an intent. */
+MP.bindGuestControls = function () {
+  if (MP._controlsBound || MP.mode !== 'guest') return;
+  MP._controlsBound = true;
+
+  var on = function (id, fn) {
+    var node = mpEl(id);
+    if (node) node.addEventListener('click', fn);
+  };
+  var mirror = function () { return MP.mirror; };
+
+  on('btn-roll', function () { MP.send({ kind: 'roll' }); });
+  on('btn-end-turn', function () { MP.send({ kind: 'endTurn' }); });
+  on('btn-build', function () {
+    if (mirror() && mirror().showBuildMenu) mirror().showBuildMenu();
+  });
+  on('btn-trade', function () {
+    if (mirror()) mirror().ui.showTradeModal();
+  });
+  on('btn-concede', function () {
+    if (mirror()) mirror().ui.showConcedeModal();
+  });
+
+  var board = mpEl('board-grid');
+  if (board) {
+    var openDeed = function (el) {
+      if (!el || !mirror()) return;
+      var type = el.dataset.type;
+      if (['property', 'railroad', 'utility'].indexOf(type) < 0) return;
+      mirror().ui.showPropertyModal(parseInt(el.dataset.space, 10));
+    };
+    board.addEventListener('click', function (e) {
+      openDeed(e.target.closest('[data-space]'));
+    });
+    board.addEventListener('keydown', function (e) {
+      if (e.key !== 'Enter' && e.key !== ' ') return;
+      var el = e.target.closest ? e.target.closest('[data-space]') : null;
+      if (!el) return;
+      e.preventDefault();
+      openDeed(el);
+    });
   }
 };
 
@@ -328,6 +385,10 @@ MP.prompt = function (playerId, kind, payload, opts) {
 
   var id = ++MP._promptSeq;
   MP._pending[id] = opts.onReply;
+  /* The question is about a board that has just changed — a rent that emptied
+     someone's pocket, a bid that moved. Send the state first so the modal is
+     drawn from what is true now rather than whatever arrived last. */
+  if (MP.host.pushSnapshot) MP.host.pushSnapshot();
   MP.host.askPeer(peerId, { id: id, kind: kind, payload: payload });
 };
 
