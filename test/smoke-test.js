@@ -14,6 +14,17 @@ function check(name, cond, detail) {
   if (!cond) fails.push(name + (detail ? ' — ' + detail : ''));
 }
 
+/* Promise callbacks have to have run before the checks that read their effect.
+   jsc can flush them on the spot; elsewhere the next macrotask does it, so the
+   engine's own setTimeout is kept here before the DOM stub below shadows it. */
+var realSetTimeout = typeof setTimeout === 'function' ? setTimeout : null;
+var lateChecks = function () {};
+function afterMicrotasks(fn) {
+  if (typeof drainMicrotasks === 'function') { drainMicrotasks(); return fn(); }
+  if (realSetTimeout) return realSetTimeout(fn, 0);
+  fn();
+}
+
 /* ------------------------------------------------------------ dom stub -- */
 
 var timers = [];
@@ -345,7 +356,7 @@ if (typeof G.Game === 'function') {
   var g3 = new G.Game(['A', 'B'], ['car', 'hat']);
   g3._playAITurn = function () { ran++; return Promise.resolve(ran < 3); };
   g3.runAITurn();
-  drainMicrotasks();
+  lateChecks = function () {
   check('doubles go round again instead of re-entering', ran === 3, String(ran));
   check('and the lock is released at the end', g3._aiRunning === false);
 
@@ -366,10 +377,12 @@ if (typeof G.Game === 'function') {
           asked.length === 1 && asked[0][0] === 1 && asked[0][1] === 0 && asked[0][2] > 0,
           JSON.stringify(asked));
   });
+  };
 }
 
 /* ------------------------------------------------------------- report -- */
 
+function report() {
 print('');
 if (typeof BOARD_SPACES !== 'undefined') {
   print('board: ' + BOARD_SPACES.length + ' spaces, ' +
@@ -385,3 +398,9 @@ if (!fails.length) {
   print('❌ ' + fails.length + ' failure(s):');
   fails.slice(0, 20).forEach(function (f) { print('  - ' + f); });
 }
+}
+
+afterMicrotasks(function () {
+  try { lateChecks(); } catch (e) { fails.push('the late checks threw: ' + (e.message || e)); }
+  report();
+});
