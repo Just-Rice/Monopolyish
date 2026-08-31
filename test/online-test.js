@@ -474,7 +474,7 @@ print('');
 print('snapshot: ' + wire.length + ' bytes for a 2-player board');
 if (!fails.length) {
   print('✅ all ' + checksRun + ' online checks passed');
-  print('   (peer discovery and the host-only modal flows are untested)');
+  print('   (peer discovery itself still needs two real browsers)');
 } else {
   print('❌ ' + fails.length + ' failure(s):');
   fails.slice(0, 20).forEach(function (f) { print('  - ' + f); });

@@ -555,7 +555,9 @@ class UI {
       if (bidder.isAI) {
         const ai = game.getAI(bidder.id);
         const bid = ai ? ai.decideAuctionBid(spaceId, state.bid, game) : 0;
-        return setTimeout(() => reply(bid > state.bid && bid <= bidder.money ? { bid } : 'pass'), 600);
+        // Long enough to read, short enough that a table of computers bidding
+        // each other up is not something you sit through.
+        return setTimeout(() => reply(bid > state.bid && bid <= bidder.money ? { bid } : 'pass'), 320);
       }
 
       MP.prompt(bidder.id, 'bid', payload, {

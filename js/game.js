@@ -294,8 +294,12 @@ class Game {
       await this._wait(800);
     }
 
-    // Wait for any async landing effects (cards, etc.)
-    await this._waitForPhase(['action', 'rolled', 'debt'], 5000);
+    /* Wait for any async landing effects — cards, a purchase, an auction.
+       'roll' belongs in that list: a player who rolled doubles is back on
+       'roll' the moment the square is settled, and leaving it out meant every
+       double an opponent threw stalled the game for the full five seconds
+       before it noticed nothing more was coming. */
+    await this._waitForPhase(['action', 'rolled', 'roll', 'debt', 'over'], 5000);
 
     // Handle debt if AI needs to raise funds
     if (this.phase === 'debt' && this._pendingDebt) {

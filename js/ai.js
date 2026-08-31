@@ -149,23 +149,44 @@ class AIPlayer {
   }
 
   // ── Auction Bidding ───────────────────────────────────────
+
+  /* Bids climb by a share of what the thing is worth, not by ten dollars a
+     time. Four computers crawling from nothing to $250 in tens is a minute of
+     watching a modal tick over, and it was the slowest thing in the game. */
+  _bidStep(price) {
+    const step = Math.max(10, Math.round((price * 0.1) / 10) * 10);
+    return step + Math.round((this._rand() * step) / 10) * 10;
+  }
+
+  /* Somewhere sensible to open, rather than a dollar above nothing. */
+  _openingBid(maxBid, price) {
+    return Math.max(10, Math.min(maxBid, Math.round((maxBid * 0.55) / 10) * 10));
+  }
+
   decideAuctionBid(spaceId, currentBid, game) {
     const space = BOARD_SPACES[spaceId];
     const player = this._getPlayer(game);
     const price = space.price || 200;
 
+    const bid = (maxBid) => {
+      if (currentBid >= maxBid) return 0;
+      const next = currentBid === 0
+        ? this._openingBid(maxBid, price)
+        : currentBid + this._bidStep(price);
+      return Math.min(Math.max(next, currentBid + 10), maxBid);
+    };
+
     switch (this.difficulty) {
       case 'easy': {
         // Bid low, sometimes pass
         if (this._rand() < 0.4) return 0; // pass
-        const maxBid = Math.floor(price * 0.5);
-        if (currentBid >= maxBid || currentBid >= player.money - 100) return 0;
-        return currentBid + 10;
+        const maxBid = Math.min(Math.floor(price * 0.5), player.money - 100);
+        return bid(maxBid);
       }
       case 'medium': {
-        const maxBid = Math.floor(price * 0.75 * this.traits.auctionNerve);
-        if (currentBid >= maxBid || currentBid >= player.money - this._reserve(200)) return 0;
-        return currentBid + Math.floor(10 + this._rand() * 20);
+        const maxBid = Math.min(Math.floor(price * 0.75 * this.traits.auctionNerve),
+                                player.money - this._reserve(200));
+        return bid(maxBid);
       }
       case 'hard': {
         const nerve = this.traits.auctionNerve;
@@ -175,9 +196,7 @@ class AIPlayer {
         // Pay more to block opponents
         else if (this._opponentGroupOwnership(space.group, game) >= 1) maxBid = Math.floor(price * nerve);
         maxBid = Math.min(maxBid, player.money - this._reserve(100));
-        if (currentBid >= maxBid) return 0;
-        const increment = Math.floor(10 + this._rand() * 30);
-        return Math.min(currentBid + increment, maxBid);
+        return bid(maxBid);
       }
     }
   }
