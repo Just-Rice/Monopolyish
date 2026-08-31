@@ -1523,7 +1523,8 @@ class Game {
         netWorth: player.bankrupt
           ? 0
           : getPlayerNetWorth(player, this.state.properties, BOARD_SPACES),
-        stats: this.stats.perPlayer[player.id]
+        // A mirror may be reading this before any stats have reached it.
+        stats: (this.stats && this.stats.perPlayer[player.id]) || {}
       }))
       .sort((a, b) => {
         if (a.player.bankrupt !== b.player.bankrupt) return a.player.bankrupt ? 1 : -1;

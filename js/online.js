@@ -126,6 +126,9 @@ MP.snapshot = function (game) {
     phase: game.phase,
     lastRoll: game.lastRoll,
     turnNumber: game.turnNumber || 0,
+    /* The end-of-game table is built from these, and a guest has no game of
+       its own to count them in. */
+    stats: game.stats || null,
     theme: (game.options && game.options.theme) || 'classic',
     rules: MP.ruleSummary(game),
     over: !!game.over,
