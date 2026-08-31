@@ -360,6 +360,9 @@ class Game {
   }
 
   async _aiRaiseFunds() {
+    // Called from the turn loop and from the debt itself, so it has to be safe
+    // to call twice for the same debt — or for one that is already settled.
+    if (!this._pendingDebt) return;
     const ai = this.getAI(this._pendingDebt.playerId);
     if (!ai) return;
 
@@ -878,7 +881,11 @@ class Game {
   }
 
   handleJailOptions() {
-    const player = this.players[this.currentPlayer];
+    /* This used to reach for a `playerId` that no line in the method defines:
+       every human turn that began in jail threw a ReferenceError instead of
+       offering the three choices, and the turn stalled there. */
+    const playerId = this.currentPlayer;
+    const player = this.players[playerId];
     // Whoever is in jail answers, wherever they are sitting.
     const payFine = () => {
       this.payMoney(this.currentPlayer, 50, 'Jail fine');
@@ -982,6 +989,15 @@ class Game {
      player sitting at another screen gets the modal sent to them and works it
      there; their sells and mortgages come back as ordinary intents. */
   askToRaiseFunds(playerId, amount, creditorId, reason) {
+    /* The computer settles its own debts, and it has to be able to do so on
+       somebody else's turn: a card can bill every player at once, and the turn
+       loop only drives the player whose turn it is. Nothing else would ever
+       answer, and the debt phase now holds the game until something does. */
+    if (this.players[playerId].isAI) {
+      setTimeout(() => this._aiRaiseFunds(), 400);
+      return;
+    }
+
     MP.prompt(playerId, 'raiseFunds', { playerId, amount, creditorId, reason }, {
       local: () => this.ui.showRaiseFundsModal(playerId, amount, creditorId, reason),
       onReply: (answer) => {
@@ -1275,15 +1291,6 @@ class Game {
          giveJailCards, getJailCards }
      Everything that follows works from that one shape — the builder, the AI,
      the modal the other player sees, and the intent a guest sends. */
-  static emptyDeal(fromId, toId) {
-    return {
-      fromId, toId,
-      giveProps: [], getProps: [],
-      giveMoney: 0, getMoney: 0,
-      giveJailCards: 0, getJailCards: 0
-    };
-  }
-
   /* Deals arrive from a modal on this screen, from the AI, and off the wire,
      so none of them is trusted: everything is checked against the board here.
      Returns { ok } or { ok:false, reason } with something worth showing. */

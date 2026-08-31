@@ -648,6 +648,46 @@ if (typeof G.Game === 'function') {
         debtor.canEndTurn() === false && debtor.canRoll() === false);
 }
 
+/* ------------------------------------------------------------- jail ---- */
+
+/* Starting a turn in jail reached for a variable that was never declared, so
+   it threw before the modal could be drawn and the turn went nowhere. */
+if (typeof G.Game === 'function') {
+  var jail = new G.Game(['A', 'B'], null);
+  jail.players[0].inJail = true;
+  jail.players[0].jailTurns = 1;
+  jail.currentPlayer = 0;
+
+  var offered = null;
+  jail.ui.showJailModal = function (player) { offered = player; };
+  var jailThrew = null;
+  try { jail.handleJailOptions(); } catch (e) { jailThrew = e.message || String(e); }
+  check('a turn that starts in jail offers the choices', jailThrew === null, jailThrew);
+  check('and offers them to the player who is in there',
+        offered === jail.players[0], String(offered && offered.name));
+
+  /* Paying the fine has to actually open the doors. */
+  var jail2 = new G.Game(['A', 'B'], null);
+  jail2.players[0].inJail = true;
+  jail2.currentPlayer = 0;
+  jail2.ui.showJailModal = function (player, onPay) { onPay(); };
+  jail2.handleJailOptions();
+  check('paying the fine gets you out and lets you roll',
+        jail2.players[0].inJail === false && jail2.players[0].money === 1450 &&
+        jail2.phase === 'roll',
+        jail2.players[0].money + '/' + jail2.phase);
+
+  var jail3 = new G.Game(['A', 'B'], null);
+  jail3.players[0].inJail = true;
+  jail3.players[0].jailCards.push({ deckType: 'chance' });
+  jail3.currentPlayer = 0;
+  jail3.ui.showJailModal = function (player, onPay, onCard) { onCard(); };
+  jail3.handleJailOptions();
+  check('and so does the card, which is spent doing it',
+        jail3.players[0].inJail === false && jail3.players[0].jailCards.length === 0 &&
+        jail3.players[0].money === 1500);
+}
+
 /* -------------------------------------------------------- speed die ---- */
 
 if (typeof G.rollDice === 'function') {
