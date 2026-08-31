@@ -83,6 +83,23 @@ MP.peerError = function (err) {
 
 /* Only the moving parts travel. The board layout and the card decks are
    identical in every copy of the game, so they never go over the wire. */
+/* initProperties() returns an object keyed by space id, not an array, so this
+   walks the ids rather than calling .map on it — which threw, and took the
+   host's first snapshot with it, leaving every guest on a blank board. The
+   result is indexed by space id either way, which is how the mirror reads it. */
+MP.propertyList = function (props) {
+  if (!props) return [];
+  var ids = Object.keys(props).map(Number).filter(function (n) { return n === n; });
+  var max = -1;
+  ids.forEach(function (i) { if (i > max) max = i; });
+  var out = [];
+  for (var i = 0; i <= max; i++) {
+    var pr = props[i];
+    out[i] = pr ? { owner: pr.owner, houses: pr.houses, mortgaged: pr.mortgaged } : null;
+  }
+  return out;
+};
+
 MP.snapshot = function (game) {
   if (!game) return null;
   return {
@@ -91,22 +108,47 @@ MP.snapshot = function (game) {
         id: p.id, name: p.name, token: p.token, color: p.color,
         money: p.money, position: p.position,
         inJail: p.inJail, jailTurns: p.jailTurns,
-        getOutOfJailCards: p.getOutOfJailCards,
-        bankrupt: p.bankrupt, isAI: p.isAI
+        /* Players keep these in `jailCards`; reading a field nobody sets sent
+           `undefined` and no guest ever saw a jail card. The array travels
+           rather than a count so the panels and the trade builder, which both
+           read .length, work off the mirror unchanged. */
+        jailCards: (p.jailCards || []).map(function (c) { return { deckType: c.deckType }; }),
+        /* Which spaces they hold: the player panels, the trade builder and the
+           raise-funds modal all list them, and a guest has none of that
+           without it. */
+        properties: (p.properties || []).slice(),
+        bankrupt: p.bankrupt, isAI: p.isAI, aiDifficulty: p.aiDifficulty,
+        aiPersonality: p.aiPersonality || null,
+        conceded: !!p.conceded
       };
     }),
-    properties: game.state.properties.map(function (pr) {
-      return pr && {
-        owner: pr.owner, houses: pr.houses, mortgaged: pr.mortgaged
-      };
-    }),
+    properties: MP.propertyList(game.state.properties),
     freeParkingPot: game.state.freeParkingPot,
     housesAvailable: game.state.housesAvailable,
     hotelsAvailable: game.state.hotelsAvailable,
     currentPlayer: game.currentPlayer,
     phase: game.phase,
     lastRoll: game.lastRoll,
+    turnNumber: game.turnNumber || 0,
+    theme: (game.options && game.options.theme) || 'classic',
+    rules: MP.ruleSummary(game),
+    over: !!game.over,
     log: (game.log || []).slice(-40)
+  };
+};
+
+/* The house rules in force, so a guest's quick reference matches the game they
+   are actually in rather than the defaults. */
+MP.ruleSummary = function (game) {
+  var o = game.options || {};
+  return {
+    freeParkingPot: game.useFreeParkingPot !== false,
+    noAuctions: !!o.noAuctions,
+    exactGoBonus: !!o.exactGoBonus,
+    noRentInJail: !!o.noRentInJail,
+    speedDie: !!o.speedDie,
+    turnLimit: o.turnLimit || 0,
+    timeLimit: o.timeLimit || 0
   };
 };
 

@@ -348,7 +348,11 @@ if (typeof G.Game === 'function') {
      became a silent no-op — the computer stopped playing for good. */
   var g2 = new G.Game(['A', 'B'], ['car', 'hat']);
   g2._playAITurn = function () { throw new Error('deliberate'); };
+  /* The failure below is the point of the check, so its console noise is not. */
+  var realError = (typeof console !== 'undefined') ? console.error : null;
+  if (realError) console.error = function () {};
   g2.runAITurn();
+  if (realError) console.error = realError;
   check('a failed AI turn does not keep the lock',
         g2._aiRunning === false, String(g2._aiRunning));
 

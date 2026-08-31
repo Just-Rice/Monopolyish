@@ -7,6 +7,8 @@
 
 var root = this;
 load('js/net.js');
+load('js/property.js');
+load('js/player.js');
 var Net = root.ChowkaNet;
 
 var fails = [];
@@ -24,23 +26,38 @@ function pump(n) {
   }
 }
 
-/* A stand-in Game with the shape MP.snapshot and MP.applyIntent expect. */
+/* A stand-in Game with the shape MP.snapshot and MP.applyIntent expect.
+ *
+ * Its players and properties come from the game's own constructors rather than
+ * being written out by hand here. A hand-built fixture is what hid two real
+ * bugs: it used an array of properties where the game uses an object keyed by
+ * space id, and a jail-card field the game does not have. Both looked fine in
+ * this file and broke the first snapshot of every online game. */
 function fakeGame() {
+  var players = createPlayers(['Ada', 'Brei'], null, null);
+  players[1].money = 1320;
+  players[1].position = 12;
+  players[1].inJail = true;
+  players[1].jailTurns = 1;
+  players[1].jailCards.push({ deckType: 'chance' });
+
+  var properties = initProperties();
+  properties[3].owner = 1;
+  properties[3].houses = 3;
+  players[1].properties.push(3);
+
   return {
     currentPlayer: 0,
     phase: 'roll',
-    lastRoll: { die1: 3, die2: 4, total: 7, doubles: false },
+    lastRoll: { d1: 3, d2: 4, total: 7, doubles: false },
+    turnNumber: 4,
     log: ['a', 'b'],
+    options: { theme: 'classic' },
+    useFreeParkingPot: true,
     rolled: 0, ended: 0, built: [],
-    players: [
-      { id:0, name:'Ada',  token:'🎩', color:'#e74c3c', money:1500, position:0,
-        inJail:false, jailTurns:0, getOutOfJailCards:0, bankrupt:false, isAI:false },
-      { id:1, name:'Brei', token:'🚗', color:'#3498db', money:1320, position:12,
-        inJail:true, jailTurns:1, getOutOfJailCards:1, bankrupt:false, isAI:false }
-    ],
+    players: players,
     state: {
-      properties: [ { owner:-1, houses:0, mortgaged:false },
-                    { owner:1, houses:3, mortgaged:false } ],
+      properties: properties,
       freeParkingPot: 250, housesAvailable: 29, hotelsAvailable: 12
     },
     handleRoll: function () { this.rolled++; this.phase = 'action'; },
@@ -67,8 +84,21 @@ check('money and position survive',
       JSON.stringify(snap.players[1]));
 check('jail state survives', snap.players[1].inJail === true);
 check('property ownership and houses survive',
-      snap.properties[1].owner === 1 && snap.properties[1].houses === 3,
-      JSON.stringify(snap.properties[1]));
+      snap.properties[3].owner === 1 && snap.properties[3].houses === 3,
+      JSON.stringify(snap.properties[3]));
+/* The game keeps properties in an object keyed by space id. Serialising it as
+   if it were an array threw, and the throw took the host's first snapshot with
+   it — guests sat on an empty board and nothing said why. */
+check('a snapshot survives the game\'s own property shape',
+      snap.properties.length === 40 && snap.properties[0] === null,
+      snap.properties.length + ' entries');
+check('which spaces a player holds survive',
+      snap.players[1].properties.join(',') === '3',
+      JSON.stringify(snap.players[1].properties));
+/* Read from a field the players do not have, every guest saw `undefined`. */
+check('jail cards survive',
+      snap.players[1].jailCards.length === 1 && snap.players[0].jailCards.length === 0,
+      JSON.stringify(snap.players[1].jailCards));
 check('the pot and the bank survive',
       snap.freeParkingPot === 250 && snap.housesAvailable === 29);
 check('whose turn it is survives', snap.currentPlayer === 0 && snap.phase === 'roll');
@@ -86,7 +116,7 @@ check('a null game gives a null snapshot', MP.snapshot(null) === null);
 MP.mode = 'guest'; MP.mySeat = 0;
 var mirror = MP.buildMirror(snap);
 check('the mirror exposes what the UI reads',
-      mirror.players.length === 2 && mirror.state.properties.length === 2 &&
+      mirror.players.length === 2 && mirror.state.properties.length === 40 &&
       typeof mirror.canRoll === 'function' && typeof mirror.canEndTurn === 'function');
 check('the seated guest may roll on their own turn', mirror.canRoll() === true);
 
