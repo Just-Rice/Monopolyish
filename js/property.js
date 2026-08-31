@@ -82,7 +82,11 @@ function calculateRent(spaceId, gameState) {
   const prop = gameState.properties[spaceId];
   if (!prop || prop.owner === null || prop.mortgaged) return 0;
 
-  const owner = gameState.players[prop.owner];
+  /* There used to be a `const owner = gameState.players[prop.owner]` here.
+     Nothing below ever read it, and the state this is called with carries the
+     board rather than the players — so every rent calculation threw, and
+     landing on an owned property paid nothing and left the turn where it was.
+     The checks below cover each of the rent tables. */
 
   if (space.type === 'railroad') {
     const railroadsOwned = [5, 15, 25, 35].filter(

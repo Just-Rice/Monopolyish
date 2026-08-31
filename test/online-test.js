@@ -12,7 +12,9 @@ load('js/player.js');
 var Net = root.ChowkaNet;
 
 var fails = [];
+var checksRun = 0;
 function check(name, cond, detail) {
+  checksRun++;
   if (!cond) fails.push(name + (detail ? ' — ' + detail : ''));
 }
 
@@ -67,6 +69,8 @@ function fakeGame() {
        that built on the wrong square passed this suite. */
     buildHouse: function (spaceId, playerId) { this.built.push([playerId, spaceId]); },
     sellHouse: function (spaceId, playerId) { this.built.push(['sell', playerId, spaceId]); },
+    mortgageProperty: function (spaceId, playerId) { this.built.push(['mortgage', playerId, spaceId]); },
+    unmortgageProperty: function (spaceId, playerId) { this.built.push(['unmortgage', playerId, spaceId]); },
     requestTrade: function (deal) { this.traded = deal; return true; },
     concede: function (playerId) { this.conceded = playerId; },
     over: false
@@ -210,6 +214,93 @@ localRan = 0;
 MP.prompt(1, 'buy', {}, { local: function () { localRan++; }, onReply: function () {} });
 check('an empty seat is answered by the host', localRan === 1);
 
+/* --------------------------------------------------- newer intents ------ */
+
+/* Deals may be struck at any time, by anyone still in — but only ever in your
+   own name, and only over a board that says they are possible. */
+game = fakeGame();
+game.currentPlayer = 0;
+check('a trade may be proposed by a player whose turn it is not',
+      MP.applyIntent(1, { kind: 'trade', deal: { fromId: 1, toId: 0 } }, game) === true,
+      JSON.stringify(game.traded));
+check('and it reaches the game as sent',
+      game.traded && game.traded.fromId === 1 && game.traded.toId === 0,
+      JSON.stringify(game.traded));
+
+game = fakeGame();
+check('but nobody may propose a trade in somebody else\'s name',
+      MP.applyIntent(1, { kind: 'trade', deal: { fromId: 0, toId: 1 } }, game) === false);
+check('and a trade with no deal in it is refused',
+      MP.applyIntent(1, { kind: 'trade' }, game) === false);
+
+game = fakeGame();
+check('conceding is allowed to the player doing it',
+      MP.applyIntent(1, { kind: 'concede' }, game) === true && game.conceded === 1,
+      String(game.conceded));
+game = fakeGame();
+check('but not on somebody else\'s behalf',
+      MP.applyIntent(1, { kind: 'concede', playerId: 0 }, game) === false);
+
+/* Raising money against a debt happens out of turn, because a card can bill a
+   player on somebody else's turn. Only the debtor gets that latitude. */
+game = fakeGame();
+game.currentPlayer = 0;
+game._pendingDebt = { playerId: 1, amount: 200, creditorId: 0 };
+check('the player who owes may sell out of turn',
+      MP.applyIntent(1, { kind: 'sell', spaceId: 3 }, game) === true,
+      JSON.stringify(game.built));
+check('and mortgage out of turn',
+      MP.applyIntent(1, { kind: 'mortgage', spaceId: 3 }, game) === true);
+check('but may not build out of turn',
+      MP.applyIntent(1, { kind: 'build', spaceId: 3 }, game) === false);
+
+game = fakeGame();
+game.currentPlayer = 0;
+check('and someone who owes nothing may not sell out of turn',
+      MP.applyIntent(1, { kind: 'sell', spaceId: 3 }, game) === false);
+
+game = fakeGame();
+game.over = true;
+check('nothing at all is applied once the game is over',
+      MP.applyIntent(0, { kind: 'roll' }, game) === false);
+
+/* --------------------------------------------------- newer prompts ------ */
+
+/* Every question a player can be asked has to be answerable from another
+   screen, or the flow it belongs to stops dead there. */
+MP.mode = 'host';
+MP.config = { seatKinds: ['local', 'remote'] };
+var questions = [];
+MP.host = {
+  peerForSeat: function (seat) { return seat === 1 ? 'PEER1' : null; },
+  askPeer: function (peer, q) { questions.push(q); },
+  pushSnapshot: function () { questions.push({ kind: 'snapshot' }); }
+};
+['bid', 'trade', 'raiseFunds', 'anywhere'].forEach(function (kind) {
+  questions = [];
+  MP.prompt(1, kind, { probe: kind }, { local: function () {}, onReply: function () {} });
+  var asked = questions.filter(function (q) { return q.kind === kind; })[0];
+  check('a ' + kind + ' question reaches the player it is for',
+        !!asked && asked.payload.probe === kind, JSON.stringify(questions));
+});
+
+/* The state a question is about goes out in front of it: the modal on the
+   other screen is drawn from the mirror, not from the question alone. */
+questions = [];
+MP.prompt(1, 'bid', { bid: 10 }, { local: function () {}, onReply: function () {} });
+check('a question is preceded by the state it is about',
+      questions.length === 2 && questions[0].kind === 'snapshot',
+      JSON.stringify(questions.map(function (q) { return q.kind; })));
+
+/* Raising funds is a conversation, so it is the one prompt whose answer comes
+   back out of band, from whichever button ends it. */
+var raiseAnswers = [];
+MP._answerRaise = function (a) { raiseAnswers.push(a); };
+MP.answerRaiseFunds('pay');
+MP.answerRaiseFunds('pay');
+check('the debtor\'s answer is delivered once and once only',
+      raiseAnswers.length === 1 && raiseAnswers[0] === 'pay', JSON.stringify(raiseAnswers));
+
 /* ------------------------------------------------- ask over the wire ---- */
 
 var net = Net.createFakeNetwork({ schedule: schedule });
@@ -249,6 +340,97 @@ pump();
 check('the answer reaches the host', replies.length === 1 && replies[0].answer === 'pay',
       JSON.stringify(replies));
 check('the answer is matched to its question', replies[0].id === 7);
+
+/* ------------------------------------------------------------- chat ----- */
+
+/* Chat rides the channel the game is already on, so the host relays it and
+   everybody — sender included — sees the same line attributed the same way. */
+var chatNet = Net.createFakeNetwork({ schedule: schedule });
+var ch = chatNet.endpoint('CH'), cg = chatNet.endpoint('CG');
+var hostHeard = [], guestHeard = [];
+Net.createHost({
+  transport: ch,
+  game: { getSeats: function () { return [{ id: 0, kind: 'local' }, { id: 1, kind: 'open' }]; },
+          getSnapshot: function () { return null; },
+          applyIntent: function () { return false; } },
+  onChat: function (from, text) { hostHeard.push(from + ': ' + text); }
+});
+var chatGuest = Net.createGuest({
+  transport: cg, name: 'Brei', selfPeerId: 'CG', clientId: 'client-brei',
+  onChat: function (from, text) { guestHeard.push(from + ': ' + text); }
+});
+chatNet.connect('CH', 'CG');
+pump();
+
+chatGuest.chat('anyone want Baltic?');
+pump();
+check('a guest\'s message reaches the host', hostHeard.length === 1 &&
+      hostHeard[0] === 'Brei: anyone want Baltic?', JSON.stringify(hostHeard));
+check('and comes back named, so everyone sees the same line',
+      guestHeard.length === 1 && guestHeard[0] === 'Brei: anyone want Baltic?',
+      JSON.stringify(guestHeard));
+
+chatGuest.chat(new Array(400).join('x'));
+pump();
+check('an over-long message is cut down rather than sent whole',
+      hostHeard[1].length < 230, String(hostHeard[1].length));
+
+/* ------------------------------------------------------- reconnecting -- */
+
+/* A player who drops comes back on a brand new peer id. Without something
+   stable to recognise them by, their seat is up for grabs and the game stays
+   paused; with it, they walk back into the seat they left. */
+var rcNet = Net.createFakeNetwork({ schedule: schedule });
+var rh = rcNet.endpoint('RH'), rg = rcNet.endpoint('RG');
+var paused = [], resumed = [], reclaimed = [];
+var rcHost = Net.createHost({
+  transport: rh,
+  game: { getSeats: function () { return [{ id: 0, kind: 'local' }, { id: 1, kind: 'open' }]; },
+          getSnapshot: function () { return { players: [], properties: [] }; },
+          applyIntent: function () { return true; } },
+  onPaused: function (seatId) { paused.push(seatId); },
+  onResumed: function (seatId) { resumed.push(seatId); },
+  onReclaimed: function (seatId, who) { reclaimed.push([seatId, who]); }
+});
+Net.createGuest({ transport: rg, name: 'Ada', selfPeerId: 'RG', clientId: 'client-ada' });
+rcNet.connect('RH', 'RG');
+pump();
+rg.broadcast({ t: Net.M.CLAIM, seatId: 1 });
+pump();
+check('the seat is taken to begin with', rcHost.peerForSeat(1) === 'RG');
+check('and remembered against the client that took it',
+      rcHost.seatForClient('client-ada') === 1, String(rcHost.seatForClient('client-ada')));
+
+rcNet.disconnect('RH', 'RG');
+pump();
+check('losing a seated player pauses the game',
+      rcHost.isPaused() === true && paused.join(',') === '1', paused.join(','));
+
+// Back on a new peer id, as a fresh connection always is.
+var rg2 = rcNet.endpoint('RG2');
+var restoredSeat = null;
+Net.createGuest({
+  transport: rg2, name: 'Ada', selfPeerId: 'RG2', clientId: 'client-ada',
+  onSeatRestored: function (seatId) { restoredSeat = seatId; }
+});
+rcNet.connect('RH', 'RG2');
+pump();
+
+check('the same client walks back into its own seat',
+      rcHost.peerForSeat(1) === 'RG2', String(rcHost.peerForSeat(1)));
+check('the guest is told which seat it got back', restoredSeat === 1, String(restoredSeat));
+check('and the game carries on', rcHost.isPaused() === false && resumed.join(',') === '1',
+      resumed.join(','));
+check('the host hears about it too', reclaimed.length === 1 && reclaimed[0][0] === 1,
+      JSON.stringify(reclaimed));
+
+/* A stranger is still a stranger: nobody else inherits that seat. */
+var rg3 = rcNet.endpoint('RG3');
+Net.createGuest({ transport: rg3, name: 'Nosy', selfPeerId: 'RG3', clientId: 'client-nosy' });
+rcNet.connect('RH', 'RG3');
+pump();
+check('somebody else arriving does not take the seat',
+      rcHost.peerForSeat(1) === 'RG2', String(rcHost.peerForSeat(1)));
 
 /* ------------------------------------ slow to connect is not a disconnect -- */
 
@@ -291,7 +473,7 @@ check('after connecting, silence does mean the host is gone', lost === 1, lost +
 print('');
 print('snapshot: ' + wire.length + ' bytes for a 2-player board');
 if (!fails.length) {
-  print('✅ all online checks passed');
+  print('✅ all ' + checksRun + ' online checks passed');
   print('   (peer discovery and the host-only modal flows are untested)');
 } else {
   print('❌ ' + fails.length + ' failure(s):');

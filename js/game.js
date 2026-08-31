@@ -107,6 +107,17 @@ class Game {
     });
   }
 
+  /* Someone who has asked their system for less motion should not have to sit
+     through a token hopping round forty squares. The move still happens step
+     by step — the log and the rules depend on it — just without the wait. */
+  _stepDelay(base) {
+    if (typeof matchMedia === 'function' &&
+        matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      return 0;
+    }
+    return base;
+  }
+
   /* Play time, across saves: a resumed game carries the clock it had. */
   elapsedMs() {
     return this._elapsedBefore + (Date.now() - this._startedAt);
@@ -562,7 +573,7 @@ class Game {
 
       this.ui.updateBoard();
       // Slight deceleration at end of movement
-      const delay = 80 + Math.floor(40 * (i / steps));
+      const delay = this._stepDelay(80 + Math.floor(40 * (i / steps)));
       await new Promise(r => setTimeout(r, delay));
     }
 
@@ -614,7 +625,7 @@ class Game {
       }
 
       this.ui.updateBoard();
-      const speed = Math.max(40, 100 - steps * 2);
+      const speed = this._stepDelay(Math.max(40, 100 - steps * 2));
       await new Promise(r => setTimeout(r, speed));
     }
 

@@ -10,7 +10,9 @@
  */
 
 var fails = [];
+var checksRun = 0;
 function check(name, cond, detail) {
+  checksRun++;
   if (!cond) fails.push(name + (detail ? ' — ' + detail : ''));
 }
 
@@ -145,6 +147,20 @@ this.localStorage = {
   removeItem: function (k) { delete this._d[k]; }
 };
 this.setTimeout = function (fn, ms) { timers.push({ fn: fn, ms: ms || 0 }); return timers.length; };
+/* Anything driven by timers — an auction going round the table, the computer
+   thinking — is unreachable in a stub that only queues them. This runs the
+   queue, and whatever the queue queues, until it settles. */
+this.runTimers = function (rounds) {
+  for (var r = 0; r < (rounds || 40); r++) {
+    var batch = timers;
+    timers = [];
+    if (!batch.length) return;
+    batch.sort(function (a, b) { return a.ms - b.ms; });
+    for (var i = 0; i < batch.length; i++) {
+      try { batch[i].fn(); } catch (e) { fails.push('a queued callback threw: ' + (e.message || e)); }
+    }
+  }
+};
 this.clearTimeout = function () {};
 this.setInterval = function () { return 0; };      // the parking-pot ticker
 this.clearInterval = function () {};
@@ -188,7 +204,9 @@ try {
     ['BOARD_SPACES','COLOR_GROUPS','CHANCE_CARDS','COMMUNITY_CHEST_CARDS',
      'ALL_TOKENS','TOKENS','PLAYER_COLORS','shuffleDeck','createDecks',
      'calculateRent','ownsFullGroup','getGroupSpaces','AIPlayer','UI','Game',
-     'startLocalGame','MP']
+     'startLocalGame','MP','canBuildHouse','canSellHouse','rollDice',
+     'Save','BOARD_THEMES','applyBoardTheme','boardThemeKeys',
+     'AI_PERSONALITIES','aiPersonalityKeys','getPlayerNetWorth','SFX']
       .map(function (n) {
         return n + ': typeof ' + n + ' !== "undefined" ? ' + n + ' : undefined';
       }).join(',') +
@@ -384,6 +402,517 @@ if (typeof G.Game === 'function') {
   };
 }
 
+/* ------------------------------------------------------------- rent ---- */
+
+/* The rent tables are the game. None of them was checked: the suite proved a
+   rent table rose, not that landing on the thing charged the right amount. */
+if (typeof G.Game === 'function') {
+  var rentGame = new G.Game(['A', 'B'], null);
+  var rentOf = function (spaceId, roll) {
+    return G.calculateRent(spaceId, Object.assign({}, rentGame.state, { lastDiceRoll: roll || 0 }));
+  };
+  var give = function (playerId, ids) {
+    ids.forEach(function (id) {
+      rentGame.state.properties[id].owner = playerId;
+      rentGame.players[playerId].properties.push(id);
+    });
+  };
+
+  check('an unowned property charges nothing', rentOf(1) === 0, String(rentOf(1)));
+
+  give(0, [5]);
+  check('one railroad charges $25', rentOf(5) === 25, String(rentOf(5)));
+  give(0, [15]);
+  check('two railroads charge $50', rentOf(5) === 50, String(rentOf(5)));
+  give(0, [25]);
+  check('three railroads charge $100', rentOf(5) === 100, String(rentOf(5)));
+  give(0, [35]);
+  check('four railroads charge $200', rentOf(5) === 200, String(rentOf(5)));
+
+  rentGame.state.properties[35].mortgaged = true;
+  check('a mortgaged railroad does not count towards the others',
+        rentOf(5) === 100, String(rentOf(5)));
+  check('and charges nothing itself', rentOf(35) === 0, String(rentOf(35)));
+  rentGame.state.properties[35].mortgaged = false;
+
+  give(0, [12]);
+  check('one utility charges four times the roll', rentOf(12, 9) === 36, String(rentOf(12, 9)));
+  give(0, [28]);
+  check('both utilities charge ten times the roll', rentOf(12, 9) === 90, String(rentOf(12, 9)));
+
+  give(0, [1]);
+  check('a single deed charges its base rent',
+        rentOf(1) === G.BOARD_SPACES[1].rent[0], String(rentOf(1)));
+  give(0, [3]);
+  check('a whole colour group charges double, unbuilt',
+        rentOf(1) === G.BOARD_SPACES[1].rent[0] * 2, String(rentOf(1)));
+
+  rentGame.state.properties[1].houses = 3;
+  check('three houses charge the three-house rent',
+        rentOf(1) === G.BOARD_SPACES[1].rent[3], String(rentOf(1)));
+  rentGame.state.properties[1].houses = 5;
+  check('a hotel charges the hotel rent',
+        rentOf(1) === G.BOARD_SPACES[1].rent[5], String(rentOf(1)));
+  rentGame.state.properties[1].mortgaged = true;
+  check('a mortgaged property charges nothing', rentOf(1) === 0, String(rentOf(1)));
+}
+
+/* ------------------------------------------------------- building ------ */
+
+if (typeof G.Game === 'function') {
+  var b = new G.Game(['A', 'B'], null);
+  var pinks = [11, 13, 14];
+  pinks.forEach(function (id) {
+    b.state.properties[id].owner = 0;
+    b.players[0].properties.push(id);
+  });
+  b.players[0].money = 5000;
+
+  check('you may build on a group you own whole',
+        G.canBuildHouse(0, 11, b.state) === true);
+  check('but not on one you do not', G.canBuildHouse(0, 1, b.state) === false);
+
+  b.buildHouse(11);
+  check('building takes the money and puts up a house',
+        b.state.properties[11].houses === 1 && b.players[0].money === 4900,
+        b.players[0].houses + ' / ' + b.players[0].money);
+  check('and takes it out of the bank\'s supply',
+        b.state.housesAvailable === 31, String(b.state.housesAvailable));
+  check('the even-build rule stops a second house on the same deed',
+        G.canBuildHouse(0, 11, b.state) === false);
+
+  b.buildHouse(13); b.buildHouse(14);
+  check('once the group is level, building resumes',
+        G.canBuildHouse(0, 11, b.state) === true);
+  check('and you may not sell from the deed with fewest',
+        G.canSellHouse(0, 11, b.state) === true &&
+        (b.buildHouse(11), G.canSellHouse(0, 13, b.state)) === false,
+        String(b.state.properties[11].houses));
+
+  // Up to a hotel, and the four houses come back to the bank.
+  var before = b.state.housesAvailable;
+  b.state.properties[11].houses = 4;
+  b.state.properties[13].houses = 4;
+  b.state.properties[14].houses = 4;
+  b.buildHouse(11);
+  check('a hotel returns its four houses to the supply',
+        b.state.properties[11].houses === 5 && b.state.housesAvailable === before + 4,
+        b.state.housesAvailable + ' vs ' + before);
+  check('and takes a hotel out of it', b.state.hotelsAvailable === 11,
+        String(b.state.hotelsAvailable));
+
+  check('a mortgaged deed in the group stops building',
+        (b.state.properties[13].mortgaged = true,
+         G.canBuildHouse(0, 14, b.state)) === false);
+}
+
+/* ------------------------------------------------------ bankruptcy ----- */
+
+if (typeof G.Game === 'function') {
+  var bk = new G.Game(['A', 'B', 'C'], null);
+  [1, 3].forEach(function (id) {
+    bk.state.properties[id].owner = 0;
+    bk.players[0].properties.push(id);
+  });
+  bk.state.properties[1].houses = 2;
+  bk.state.housesAvailable -= 2;
+  bk.players[0].money = 120;
+  bk.players[0].jailCards.push({ deckType: 'chance' });
+
+  var creditorCash = bk.players[1].money;
+  var houseSupply = bk.state.housesAvailable;
+  bk.declareBankruptcy(0, 1);
+
+  check('a bankrupt player is out', bk.players[0].bankrupt === true);
+  check('their cash goes to the creditor',
+        bk.players[1].money === creditorCash + 120, String(bk.players[1].money));
+  check('their deeds go with it',
+        bk.state.properties[1].owner === 1 && bk.state.properties[3].owner === 1);
+  check('their jail card goes too', bk.players[1].jailCards.length === 1);
+  check('and the buildings go back to the bank',
+        bk.state.housesAvailable === houseSupply + 2 && bk.state.properties[1].houses === 0,
+        String(bk.state.housesAvailable));
+  check('they keep nothing',
+        bk.players[0].properties.length === 0 && bk.players[0].money === 0);
+
+  // To the bank instead: the deeds are for sale again.
+  var bk2 = new G.Game(['A', 'B', 'C'], null);
+  bk2.state.properties[6].owner = 0;
+  bk2.players[0].properties.push(6);
+  bk2.state.properties[6].mortgaged = true;
+  bk2.declareBankruptcy(0, -1);
+  check('going bankrupt to the bank frees the deeds',
+        bk2.state.properties[6].owner === null &&
+        bk2.state.properties[6].mortgaged === false);
+
+  // Last one standing wins.
+  var bk3 = new G.Game(['A', 'B'], null);
+  bk3.declareBankruptcy(1, 0);
+  check('the last player standing ends the game',
+        bk3.over === true && bk3.endReason === 'last player standing',
+        String(bk3.endReason));
+}
+
+/* ------------------------------------------------------ house rules ---- */
+
+if (typeof G.Game === 'function') {
+  var noAuction = new G.Game(['A', 'B'], null, { noAuctions: true });
+  var auctionsShown = 0;
+  noAuction.ui.showAuctionModal = function () { auctionsShown++; };
+  noAuction.startAuction(1);
+  check('the no-auction rule leaves a declined deed with the bank',
+        auctionsShown === 0 && noAuction.state.properties[1].owner === null);
+
+  var auctioned = new G.Game(['A', 'B'], null);
+  auctioned.ui.showAuctionModal = function () { auctionsShown++; };
+  auctioned.startAuction(1);
+  check('and without it, the deed goes under the hammer', auctionsShown === 1);
+
+  var goGame = new G.Game(['A', 'B'], null, { exactGoBonus: true });
+  goGame.players[0].money = 0;
+  goGame.landOnSpace(0, 0);
+  check('landing exactly on GO pays a second $200 when the rule is on',
+        goGame.players[0].money === 200, String(goGame.players[0].money));
+
+  var plainGo = new G.Game(['A', 'B'], null);
+  plainGo.players[0].money = 0;
+  plainGo.landOnSpace(0, 0);
+  check('and nothing extra when it is off',
+        plainGo.players[0].money === 0, String(plainGo.players[0].money));
+
+  var jailRule = new G.Game(['A', 'B'], null, { noRentInJail: true });
+  jailRule.state.properties[1].owner = 1;
+  jailRule.players[1].properties.push(1);
+  jailRule.players[1].inJail = true;
+  jailRule.players[0].money = 1500;
+  jailRule.handlePropertyLanding(0, 1);
+  check('a landlord in jail collects no rent under the house rule',
+        jailRule.players[0].money === 1500, String(jailRule.players[0].money));
+
+  var shortGame = new G.Game(['A', 'B', 'C'], null, { shortGame: true });
+  var dealt = shortGame.players.map(function (p) { return p.properties.length; });
+  check('the short game deals two deeds to each player',
+        dealt.every(function (n) { return n === 2; }), dealt.join(','));
+  var owners = {};
+  shortGame.players.forEach(function (p) {
+    p.properties.forEach(function (id) { owners[id] = (owners[id] || 0) + 1; });
+  });
+  check('and never deals the same one twice',
+        Object.keys(owners).every(function (id) { return owners[id] === 1; }));
+  check('every dealt deed is recorded on the board too',
+        shortGame.players.every(function (p) {
+          return p.properties.every(function (id) {
+            return shortGame.state.properties[id].owner === p.id;
+          });
+        }));
+
+  var rich = new G.Game(['A', 'B'], null, { startingCash: 2500 });
+  check('starting cash is settable',
+        rich.players.every(function (p) { return p.money === 2500; }),
+        String(rich.players[0].money));
+}
+
+/* ------------------------------------------------------- the clock ----- */
+
+if (typeof G.Game === 'function') {
+  var limited = new G.Game(['A', 'B'], null, { turnLimit: 2 });
+  limited.players[0].money = 100;
+  limited.players[1].money = 900;
+  limited.phase = 'action';
+  limited.turnNumber = 2;
+  limited.currentPlayer = 1;
+  limited.endTurn();                    // wraps back to player 0: round 3
+  check('the round limit ends the game', limited.over === true, String(limited.turnNumber));
+  check('and the richest player wins it',
+        limited.standings()[0].player.id === 1,
+        JSON.stringify(limited.standings().map(function (s) { return s.netWorth; })));
+
+  var conceder = new G.Game(['A', 'B', 'C'], null);
+  conceder.concede(1);
+  check('conceding marks the player and takes them out',
+        conceder.players[1].conceded === true && conceder.players[1].bankrupt === true);
+  check('and does not end a game with players left', conceder.over === false);
+
+  /* A debt has to survive the turn carrying on around it, or the player can
+     roll and end their turn still owing the money. */
+  var debtor = new G.Game(['A', 'B'], null);
+  debtor.state.properties[39].owner = 1;
+  debtor.players[1].properties.push(39);
+  debtor.state.properties[37].owner = 0;
+  debtor.players[0].properties.push(37);   // something to sell
+  debtor.players[0].money = 5;
+  debtor.handlePropertyLanding(0, 39);
+  check('an unpayable rent leaves the game in debt',
+        debtor.phase === 'debt' && !!debtor._pendingDebt, debtor.phase);
+  check('and the turn cannot be ended while it stands',
+        debtor.canEndTurn() === false && debtor.canRoll() === false);
+}
+
+/* -------------------------------------------------------- speed die ---- */
+
+if (typeof G.rollDice === 'function') {
+  var faces = {};
+  var triples = 0;
+  var badTriple = null, badTotal = null;
+  for (var sd = 0; sd < 4000; sd++) {
+    var roll = G.rollDice(true);
+    faces[roll.speed.kind] = (faces[roll.speed.kind] || 0) + 1;
+    if (roll.triples) {
+      triples++;
+      if (!(roll.d1 === roll.d2 && roll.d2 === roll.speed.value)) badTriple = roll;
+    }
+    var expected = roll.d1 + roll.d2 + (roll.speed.kind === 'number' ? roll.speed.value : 0);
+    if (roll.total !== expected) badTotal = roll;
+  }
+  check('a triple is always three of a kind', badTriple === null, JSON.stringify(badTriple));
+  check('a numbered speed die adds to the total, and the others do not',
+        badTotal === null, JSON.stringify(badTotal));
+  check('all three speed faces come up',
+        faces.number > 0 && faces.monopoly > 0 && faces.bus > 0, JSON.stringify(faces));
+  check('triples happen, but rarely', triples > 0 && triples < 400, String(triples));
+  check('without the rule there is no third die', G.rollDice(false).speed === undefined);
+}
+
+/* --------------------------------------------------------- auctions ---- */
+
+/* The auction was untestable while it lived inside one modal. Now that each
+   bidder is asked a question, a table of computer players can be run through
+   a whole auction here. */
+if (typeof G.Game === 'function') {
+  var au = new G.Game(['CPU A', 'CPU B'], null, {
+    aiConfigs: [{ isAI: true, difficulty: 'hard' }, { isAI: true, difficulty: 'medium' }]
+  });
+  au.ui.showAuctionModal.call(au.ui, 39);       // Boardwalk, worth bidding for
+  runTimers(200);
+  var sold = au.state.properties[39];
+  check('an auction between computer players ends with a sale',
+        sold.owner === 0 || sold.owner === 1, JSON.stringify(sold));
+  if (sold.owner !== null) {
+    check('the winner paid for it',
+          au.players[sold.owner].money < 1500, String(au.players[sold.owner].money));
+    check('and it is counted as an auction won',
+          au.stats.perPlayer[sold.owner].auctionsWon === 1,
+          String(au.stats.perPlayer[sold.owner].auctionsWon));
+  }
+  check('and the turn is released afterwards', au.phase !== 'rolling', au.phase);
+
+  /* Nobody can afford it: it stays with the bank rather than hanging. */
+  var broke = new G.Game(['CPU A', 'CPU B'], null, {
+    aiConfigs: [{ isAI: true, difficulty: 'easy' }, { isAI: true, difficulty: 'easy' }]
+  });
+  broke.players.forEach(function (p) { p.money = 0; });
+  broke.ui.showAuctionModal.call(broke.ui, 39);
+  runTimers(200);
+  check('an auction nobody can bid in ends with the bank keeping it',
+        broke.state.properties[39].owner === null,
+        String(broke.state.properties[39].owner));
+}
+
+/* ------------------------------------------------------------ trades --- */
+
+if (typeof G.Game === 'function') {
+  var tr = new G.Game(['A', 'B'], null);
+  [11, 13].forEach(function (id) {
+    tr.state.properties[id].owner = 0;
+    tr.players[0].properties.push(id);
+  });
+  tr.state.properties[14].owner = 1;
+  tr.players[1].properties.push(14);
+
+  var deal = { fromId: 0, toId: 1, giveProps: [11], getProps: [14],
+               giveMoney: 100, getMoney: 0, giveJailCards: 0, getJailCards: 0 };
+  check('a deal both players can honour is legal', tr.validateDeal(deal).ok === true,
+        tr.validateDeal(deal).reason);
+
+  check('you cannot trade away what you do not own',
+        tr.validateDeal({ fromId: 0, toId: 1, giveProps: [14], getProps: [] }).ok === false);
+  check('nor money you do not have',
+        tr.validateDeal({ fromId: 0, toId: 1, giveProps: [], getProps: [],
+                          giveMoney: 99999 }).ok === false);
+  check('nor a jail card you were never given',
+        tr.validateDeal({ fromId: 0, toId: 1, giveProps: [], getProps: [],
+                          giveJailCards: 1 }).ok === false);
+  check('an empty trade is refused',
+        tr.validateDeal({ fromId: 0, toId: 1, giveProps: [], getProps: [] }).ok === false);
+  check('and so is trading with yourself',
+        tr.validateDeal({ fromId: 0, toId: 0, giveProps: [11], getProps: [] }).ok === false);
+
+  /* Buildings anywhere in a group freeze every deed in it — otherwise a house
+     could change colour groups mid-game. */
+  tr.state.properties[13].houses = 1;
+  check('a group with a house on it cannot be broken up',
+        tr.validateDeal(deal).ok === false, tr.validateDeal(deal).reason);
+  tr.state.properties[13].houses = 0;
+
+  tr.executeTrade(0, 1, [11], [14], 100, 0, 0, 0);
+  check('a trade moves the deeds',
+        tr.state.properties[11].owner === 1 && tr.state.properties[14].owner === 0);
+  check('and the money',
+        tr.players[0].money === 1400 && tr.players[1].money === 1600,
+        tr.players[0].money + '/' + tr.players[1].money);
+  check('and each player\'s own list of deeds keeps up',
+        tr.players[0].properties.indexOf(14) >= 0 &&
+        tr.players[0].properties.indexOf(11) < 0 &&
+        tr.players[1].properties.indexOf(11) >= 0,
+        JSON.stringify([tr.players[0].properties, tr.players[1].properties]));
+}
+
+/* ------------------------------------------------------ the computer -- */
+
+if (typeof G.AIPlayer === 'function' && typeof G.Game === 'function') {
+  var mk = function (difficulty, personality) {
+    var g = new G.Game(['CPU', 'You'], null, {
+      aiConfigs: [{ isAI: true, difficulty: difficulty, personality: personality }, { isAI: false }]
+    });
+    return g;
+  };
+
+  /* The AI holds two of the three pinks; the human holds the third. */
+  var setUpPinks = function (g, aiHoldsTwo) {
+    var mine = aiHoldsTwo ? [11, 13] : [14];
+    var theirs = aiHoldsTwo ? [14] : [11, 13];
+    mine.forEach(function (id) { g.state.properties[id].owner = 0; g.players[0].properties.push(id); });
+    theirs.forEach(function (id) { g.state.properties[id].owner = 1; g.players[1].properties.push(id); });
+  };
+
+  var g1 = mk('medium', 'balanced');
+  setUpPinks(g1, true);
+  var ai1 = g1.getAI(0);
+  check('the computer takes the deed that completes its own set',
+        ai1.decideTrade({ fromId: 1, toId: 0, giveProps: [14], getProps: [],
+                          giveMoney: 0, getMoney: 200 }, g1).accept === true);
+  check('and turns down a deed it does not need for a price it does not like',
+        ai1.decideTrade({ fromId: 1, toId: 0, giveProps: [], getProps: [11],
+                          giveMoney: 20, getMoney: 0 }, g1).accept === false);
+
+  var g2 = mk('hard', 'balanced');
+  setUpPinks(g2, false);              // the human is one deed short of a set
+  var ai2 = g2.getAI(0);
+  check('a hard computer will not hand over a colour group at any price',
+        ai2.decideTrade({ fromId: 1, toId: 0, giveProps: [], getProps: [14],
+                          giveMoney: 5000, getMoney: 0 }, g2).accept === false,
+        JSON.stringify(ai2.decideTrade({ fromId: 1, toId: 0, giveProps: [], getProps: [14],
+                                         giveMoney: 5000, getMoney: 0 }, g2)));
+
+  var g3 = mk('medium', 'balanced');
+  setUpPinks(g3, false);
+  var ai3 = g3.getAI(0);
+  var sells = false;
+  for (var price = 100; price <= 4000 && !sells; price += 50) {
+    sells = ai3.decideTrade({ fromId: 1, toId: 0, giveProps: [], getProps: [14],
+                              giveMoney: price, getMoney: 0 }, g3).accept;
+  }
+  check('a merely competent one has a price for it', sells === true);
+
+  var g4 = mk('hard', 'hustler');
+  setUpPinks(g4, true);
+  var proposal = null;
+  for (var attempt = 0; attempt < 60 && !proposal; attempt++) {
+    proposal = g4.getAI(0).proposeTrade(g4);
+  }
+  check('the computer opens a negotiation of its own', !!proposal,
+        String(proposal));
+  if (proposal) {
+    check('and asks for the deed it is missing',
+          proposal.getProps.length === 1 && proposal.getProps[0] === 14,
+          JSON.stringify(proposal));
+    check('offering something for it',
+          proposal.giveMoney > 0 || proposal.giveProps.length > 0,
+          JSON.stringify(proposal));
+    check('and the offer it makes is a legal one',
+          g4.validateDeal(proposal).ok === true, g4.validateDeal(proposal).reason);
+  }
+
+  var g5 = mk('easy', 'balanced');
+  check('easy players do not go looking for deals', g5.getAI(0).proposeTrade(g5) === null);
+
+  check('every personality is a real one',
+        G.aiPersonalityKeys().every(function (key) { return !!G.AI_PERSONALITIES[key]; }));
+  var picked = {};
+  for (var n = 0; n < 200; n++) picked[new G.AIPlayer(0, 'medium').personality] = true;
+  check('and one is picked at random when nobody chooses',
+        Object.keys(picked).length > 1, Object.keys(picked).join(','));
+  check('a named personality is the one you get',
+        new G.AIPlayer(0, 'medium', 'miser').personality === 'miser');
+}
+
+/* ------------------------------------------------------------- saves --- */
+
+if (typeof G.Save !== 'undefined' && typeof G.Game === 'function') {
+  var live = new G.Game(['A', 'B'], null, { speedDie: true, turnLimit: 30, theme: 'london' });
+  live.players[0].money = 1234;
+  live.players[0].position = 19;
+  [16, 18, 19].forEach(function (id) {
+    live.state.properties[id].owner = 0;
+    live.players[0].properties.push(id);
+  });
+  live.state.properties[19].houses = 3;
+  live.state.properties[16].mortgaged = true;
+  live.players[1].jailCards.push({ deckType: 'community' });
+  live.players[1].inJail = true;
+  live.players[1].jailTurns = 2;
+  live.turnNumber = 9;
+  live.decks.chanceIndex = 4;
+  live.stats.perPlayer[0].rentCollected = 550;
+  live.log.push('something that happened');
+
+  var blob = JSON.parse(JSON.stringify(G.Save.serialize(live)));
+  var restored = new G.Game(['A', 'B'], null);
+  var ok = G.Save.apply(restored, blob);
+
+  check('a saved game can be poured back into a new one', ok === true);
+  check('money and position survive',
+        restored.players[0].money === 1234 && restored.players[0].position === 19);
+  check('deeds, houses and mortgages survive',
+        restored.state.properties[19].houses === 3 &&
+        restored.state.properties[16].mortgaged === true &&
+        restored.players[0].properties.join(',') === '16,18,19',
+        JSON.stringify(restored.players[0].properties));
+  check('jail survives',
+        restored.players[1].inJail === true && restored.players[1].jailTurns === 2 &&
+        restored.players[1].jailCards.length === 1);
+  check('the round number and the house rules survive',
+        restored.turnNumber === 9 && restored.options.speedDie === true &&
+        restored.options.turnLimit === 30 && restored.options.theme === 'london',
+        JSON.stringify(restored.options));
+  check('the statistics survive',
+        restored.stats.perPlayer[0].rentCollected === 550);
+  check('the log survives', restored.log.indexOf('something that happened') >= 0);
+  check('the card decks come back in the order they were left in',
+        restored.decks.chance.map(function (c) { return c.id; }).join(',') ===
+        live.decks.chance.map(function (c) { return c.id; }).join(',') &&
+        restored.decks.chanceIndex === 4);
+  check('and they are the real cards, not the ids they travelled as',
+        typeof restored.decks.chance[0].action === 'function');
+
+  check('a save from another version is refused',
+        G.Save.apply(new G.Game(['A', 'B'], null), { version: 999 }) === false);
+  check('and so is nothing at all',
+        G.Save.apply(new G.Game(['A', 'B'], null), null) === false);
+}
+
+/* ------------------------------------------------------------ themes --- */
+
+if (typeof G.applyBoardTheme === 'function') {
+  var classicNames = G.BOARD_SPACES.map(function (s) { return s.name; });
+  G.applyBoardTheme('london');
+  check('a theme renames the board', G.BOARD_SPACES[39].name === 'Mayfair',
+        G.BOARD_SPACES[39].name);
+  check('but moves nothing', G.BOARD_SPACES[39].price === 400 &&
+        G.BOARD_SPACES[39].group === 'darkblue' && G.BOARD_SPACES.length === 40);
+  G.applyBoardTheme('world');
+  check('switching themes does not compound', G.BOARD_SPACES[39].name === 'Tokyo',
+        G.BOARD_SPACES[39].name);
+  G.applyBoardTheme('classic');
+  check('and going back gives the original names',
+        G.BOARD_SPACES.map(function (s) { return s.name; }).join('|') === classicNames.join('|'));
+  check('every theme names spaces the board actually has',
+        G.boardThemeKeys().every(function (key) {
+          return Object.keys(G.BOARD_THEMES[key].names)
+            .every(function (id) { return !!G.BOARD_SPACES[id]; });
+        }));
+}
+
 /* ------------------------------------------------------------- report -- */
 
 function report() {
@@ -397,7 +926,7 @@ if (typeof CHANCE_CARDS !== 'undefined') {
         COMMUNITY_CHEST_CARDS.length + ' community chest');
 }
 if (!fails.length) {
-  print('✅ all smoke checks passed');
+  print('✅ all ' + checksRun + ' smoke checks passed');
 } else {
   print('❌ ' + fails.length + ' failure(s):');
   fails.slice(0, 20).forEach(function (f) { print('  - ' + f); });
