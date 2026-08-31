@@ -63,6 +63,10 @@ class UI {
         const dot = document.createElement('div');
         dot.className = 'owner-dot';
         dot.style.background = player.color;
+        /* The token, not just the colour: two players can pick shades a
+           colour-blind reader cannot tell apart, and they often do. */
+        dot.textContent = player.token && player.token.emoji ? player.token.emoji : '';
+        dot.title = `Owned by ${player.name}`;
         el.appendChild(dot);
       }
 
@@ -91,10 +95,38 @@ class UI {
       } else {
         el.classList.remove('mortgaged');
       }
+
+      el.setAttribute('aria-label', this.describeSpace(space.id));
     });
 
     // Move player tokens
     this.updateTokens();
+  }
+
+  /* What a screen reader is told about a square: its name, who holds it, what
+     is built on it and who is standing there. */
+  describeSpace(spaceId) {
+    const game = this.game;
+    const space = BOARD_SPACES[spaceId];
+    if (!space) return '';
+    const parts = [space.name];
+
+    const prop = game.state.properties[spaceId];
+    if (prop) {
+      if (space.price) parts.push(`$${space.price}`);
+      if (prop.owner === null) {
+        parts.push('unowned');
+      } else {
+        parts.push(`owned by ${game.players[prop.owner].name}`);
+        if (prop.mortgaged) parts.push('mortgaged');
+        if (prop.houses === 5) parts.push('hotel');
+        else if (prop.houses > 0) parts.push(`${prop.houses} house${prop.houses > 1 ? 's' : ''}`);
+      }
+    }
+
+    const here = game.players.filter(p => !p.bankrupt && p.position === spaceId);
+    if (here.length) parts.push(`${here.map(p => p.name).join(' and ')} here`);
+    return parts.join(', ');
   }
 
   updateTokens() {
@@ -168,11 +200,14 @@ class UI {
       panel.className = `player-panel ${isCurrent ? 'active' : ''} ${player.bankrupt ? 'bankrupt' : ''} ${player.isAI ? 'ai-player' : ''}`;
       panel.id = `player-panel-${i}`;
       const diffLabel = player.isAI ? { easy: 'Easy', medium: 'Med', hard: 'Hard' }[player.aiDifficulty] || '' : '';
+      const persona = player.isAI && typeof AI_PERSONALITIES !== 'undefined' &&
+                      AI_PERSONALITIES[player.aiPersonality]
+        ? AI_PERSONALITIES[player.aiPersonality] : null;
       panel.innerHTML = `
         <div class="panel-header">
           <span class="player-token-sm" style="background:${player.color}">${player.token.emoji}</span>
           <span class="player-name">${player.isAI ? '🤖 ' : ''}${player.name}</span>
-          ${player.isAI ? `<span class="ai-badge">CPU·${diffLabel}</span>` : ''}
+          ${player.isAI ? `<span class="ai-badge" title="${persona ? persona.blurb : ''}">${persona ? persona.label : 'CPU'}·${diffLabel}</span>` : ''}
           ${isCurrent ? '<span class="current-badge">CURRENT</span>' : ''}
           ${player.bankrupt ? '<span class="bankrupt-badge">BANKRUPT</span>' : ''}
         </div>
@@ -212,8 +247,29 @@ class UI {
     }
     if (posEl) {
       const space = BOARD_SPACES[player.position];
-      posEl.textContent = space ? space.name : '';
+      const round = game.turnNumber ? ` · round ${game.turnNumber}` : '';
+      posEl.textContent = (space ? space.name : '') + round;
     }
+  }
+
+  /* Whoever this browser is playing for and who is still in the game. Offline
+     that is everybody at the table; online it is your own seat. */
+  seatsHere() {
+    return this.game.players.filter(p => !p.bankrupt &&
+      (typeof MP === 'undefined' || MP.controls(p.id)) && !p.isAI);
+  }
+
+  /* Who a trade opened from this screen comes from: the player to move if that
+     is one of ours, otherwise the first seat we hold. */
+  defaultTrader() {
+    const game = this.game;
+    const current = game.players[game.currentPlayer];
+    const mine = this.seatsHere();
+    if (current && !current.bankrupt && !current.isAI &&
+        (typeof MP === 'undefined' || MP.controls(current.id))) {
+      return current.id;
+    }
+    return mine.length ? mine[0].id : null;
   }
 
   updateActionButtons() {
@@ -225,18 +281,23 @@ class UI {
     const endBtn = document.getElementById('btn-end-turn');
     const buildBtn = document.getElementById('btn-build');
     const tradeBtn = document.getElementById('btn-trade');
+    const concedeBtn = document.getElementById('btn-concede');
 
-    if (isAI) {
-      // Disable all buttons during AI turn
-      if (rollBtn) rollBtn.disabled = true;
-      if (endBtn) endBtn.disabled = true;
-      if (buildBtn) buildBtn.disabled = true;
-      if (tradeBtn) tradeBtn.disabled = true;
-    } else {
-      if (rollBtn) rollBtn.disabled = !game.canRoll();
-      if (endBtn) endBtn.disabled = !game.canEndTurn();
-      if (buildBtn) buildBtn.disabled = game.phase !== 'action' && game.phase !== 'rolled';
-      if (tradeBtn) tradeBtn.disabled = game.phase !== 'action' && game.phase !== 'rolled';
+    const myTurn = !isAI && (typeof MP === 'undefined' || MP.controls(game.currentPlayer));
+    const turnActions = myTurn && (game.phase === 'action' || game.phase === 'rolled');
+
+    if (rollBtn) rollBtn.disabled = isAI || !game.canRoll();
+    if (endBtn) endBtn.disabled = isAI || !game.canEndTurn();
+    if (buildBtn) buildBtn.disabled = !turnActions;
+
+    /* Trading is deliberately not tied to the turn: at a real table the useful
+       moment to make a deal is usually while somebody else is rolling. */
+    const canTrade = typeof game.canTrade === 'function' ? game.canTrade() : turnActions;
+    if (tradeBtn) tradeBtn.disabled = !canTrade || this.defaultTrader() === null;
+
+    if (concedeBtn) {
+      const mine = this.seatsHere();
+      concedeBtn.disabled = !!game.over || mine.length === 0;
     }
   }
 
@@ -246,6 +307,16 @@ class UI {
     const content = document.getElementById('modal-content');
     content.innerHTML = html;
     overlay.classList.add('active');
+
+    /* Keyboard and screen-reader users need to know a dialog opened, and to
+       land inside it rather than at the top of the page. */
+    if (overlay.setAttribute) {
+      overlay.setAttribute('role', 'dialog');
+      overlay.setAttribute('aria-modal', 'true');
+    }
+    this._returnFocusTo = (typeof document !== 'undefined' && document.activeElement) || null;
+    const first = content.querySelector && content.querySelector('button, input, select, textarea');
+    if (first && first.focus) { try { first.focus(); } catch (e) {} }
 
     if (options.onClose) {
       overlay.addEventListener('click', (e) => {
@@ -259,6 +330,23 @@ class UI {
 
   closeModal() {
     document.getElementById('modal-overlay').classList.remove('active');
+    this.sticky = null;
+    const back = this._returnFocusTo;
+    this._returnFocusTo = null;
+    if (back && back.focus) { try { back.focus(); } catch (e) {} }
+  }
+
+  /* Some modals have to survive a fresh snapshot — raising funds is a
+     back-and-forth against a board that keeps changing under it. A sticky
+     modal records how to draw itself again. */
+  setSticky(kind, redraw) {
+    this.sticky = { kind, redraw };
+  }
+
+  redrawSticky() {
+    if (this.sticky && typeof this.sticky.redraw === 'function') {
+      try { this.sticky.redraw(); } catch (e) { this.sticky = null; }
+    }
   }
 
   showPropertyModal(spaceId) {
@@ -388,118 +476,149 @@ class UI {
     document.getElementById('modal-auction')?.addEventListener('click', () => { this.closeModal(); onAuction(); });
   }
 
+  /* An auction is a live loop rather than a single question, which is why it
+   * used to run entirely on the host with everyone else watching a screen they
+   * could not touch. It is now a loop of single questions: each bidder in turn
+   * is asked what they want to do, wherever they happen to be sitting, and the
+   * rest of the table is told what happened.
+   */
   showAuctionModal(spaceId) {
-    const space = BOARD_SPACES[spaceId];
     const game = this.game;
-    const activePlayers = game.players.filter(p => !p.bankrupt);
-    let currentBidder = 0;
-    let highestBid = 0;
-    let highestBidder = -1;
-    let passed = new Set();
+    const space = BOARD_SPACES[spaceId];
+    const bidders = game.players.filter(p => !p.bankrupt);
+    const state = { bid: 0, leader: -1, passed: new Set(), turn: 0 };
 
-    const render = () => {
-      const bidder = activePlayers[currentBidder % activePlayers.length];
+    if (!bidders.length) return game.endLandAction();
 
-      // AI auto-bids
-      if (bidder.isAI) {
-        const ai = game.getAI(bidder.id);
-        if (ai && !passed.has(bidder.id)) {
-          setTimeout(() => {
-            const bid = ai.decideAuctionBid(spaceId, highestBid, game);
-            if (bid > highestBid && bid <= bidder.money) {
-              highestBid = bid;
-              highestBidder = bidder.id;
-              this.showToast(`🤖 ${bidder.name} bids $${bid}!`, 'info');
-              game.ui.addGameLog(`🤖 ${bidder.name} bids $${bid} in auction`);
-            } else {
-              passed.add(bidder.id);
-              this.showToast(`🤖 ${bidder.name} passes.`, 'info');
-            }
-            advance();
-          }, 500);
-        } else {
-          advance();
-        }
-        return;
-      }
-
-      const html = `
-        <div class="auction-modal">
-          <h2>🔨 Auction: ${space.name}</h2>
-          <div class="auction-info">
-            <div class="current-bid">Current Bid: <strong>$${highestBid}</strong></div>
-            ${highestBidder >= 0 ? `<div class="highest-bidder">Highest: <strong>${game.players[highestBidder].name}</strong></div>` : ''}
-          </div>
-          <div class="bidder-turn">
-            <span class="player-token-sm" style="background:${bidder.color}">${bidder.token.emoji}</span>
-            <strong>${bidder.name}'s</strong> turn to bid (Balance: $${bidder.money.toLocaleString()})
-          </div>
-          ${passed.has(bidder.id) ? '<p class="passed-label">Already Passed</p>' : `
-            <div class="bid-controls">
-              <input type="number" id="bid-amount" min="${highestBid + 1}" max="${bidder.money}" value="${highestBid + 10}" step="10" class="bid-input">
-              <button class="btn btn-success" id="bid-submit">Place Bid</button>
-              <button class="btn btn-danger" id="bid-pass">Pass</button>
-            </div>
-          `}
-        </div>`;
-
-      document.getElementById('modal-content').innerHTML = html;
-
-      if (!passed.has(bidder.id)) {
-        document.getElementById('bid-submit')?.addEventListener('click', () => {
-          const amt = parseInt(document.getElementById('bid-amount').value, 10);
-          // A bid that cannot stand says why. Silently doing nothing makes a
-          // working button look broken, which is worse than a refusal.
-          if (!Number.isFinite(amt)) {
-            this.showToast('Enter an amount to bid.', 'warning');
-            return;
-          }
-          if (amt <= highestBid) {
-            this.showToast(`Bid more than $${highestBid.toLocaleString()} to take the lead.`, 'warning');
-            return;
-          }
-          if (amt > bidder.money) {
-            this.showToast(`${bidder.name} only has $${bidder.money.toLocaleString()}.`, 'warning');
-            return;
-          }
-          highestBid = amt;
-          highestBidder = bidder.id;
-          advance();
-        });
-        document.getElementById('bid-pass')?.addEventListener('click', () => {
-          passed.add(bidder.id);
-          advance();
-        });
+    const settle = () => {
+      if (state.leader >= 0 && state.bid > 0) {
+        game.purchaseProperty(state.leader, spaceId, state.bid);
+        game.stats.perPlayer[state.leader].auctionsWon++;
+        this.closeModal();
+        const winner = game.players[state.leader];
+        this.showToast(`${winner.name} won the auction for ${space.name} at $${state.bid}!`, 'success');
+        this.announce(`🔨 ${winner.name} won ${space.name} for $${state.bid}`);
       } else {
-        advance();
+        this.closeModal();
+        this.showToast(`${space.name} was not sold.`, 'info');
+        this.announce(`🔨 ${space.name} drew no bids`);
       }
+      game.endLandAction();
     };
 
     const advance = () => {
-      currentBidder++;
-      const remaining = activePlayers.filter(p => !passed.has(p.id));
-      if (remaining.length === 0 || (remaining.length === 1 && highestBidder >= 0)) {
-        // Auction over
-        if (highestBidder >= 0 && highestBid > 0) {
-          game.purchaseProperty(highestBidder, spaceId, highestBid);
-          this.closeModal();
-          this.showToast(`${game.players[highestBidder].name} won auction for ${space.name} at $${highestBid}!`, 'success');
-        } else {
-          this.closeModal();
-          this.showToast(`${space.name} was not sold.`, 'info');
+      const live = bidders.filter(p => !state.passed.has(p.id) && !p.bankrupt);
+      if (!live.length) return settle();
+      if (live.length === 1 && state.leader === live[0].id) return settle();
+
+      // Next bidder still in, starting after the one who just answered.
+      for (let step = 1; step <= bidders.length; step++) {
+        const candidate = bidders[(state.turn + step) % bidders.length];
+        if (!state.passed.has(candidate.id) && !candidate.bankrupt) {
+          state.turn = bidders.indexOf(candidate);
+          return setTimeout(() => ask(candidate), 120);
         }
-        game.endLandAction();
-        return;
       }
-      // Skip passed players
-      while (passed.has(activePlayers[currentBidder % activePlayers.length].id)) {
-        currentBidder++;
+      settle();
+    };
+
+    const answer = (bidder) => (reply) => {
+      const amount = reply && typeof reply === 'object' ? Number(reply.bid) : NaN;
+      if (Number.isFinite(amount) && amount > state.bid && amount <= bidder.money) {
+        state.bid = amount;
+        state.leader = bidder.id;
+        this.showToast(`${bidder.name} bids $${amount}!`, 'info');
+        this.announce(`🔨 ${bidder.name} bids $${amount} for ${space.name}`);
+      } else {
+        state.passed.add(bidder.id);
+        this.showToast(`${bidder.name} passes.`, 'info');
+        this.announce(`🔨 ${bidder.name} passes on ${space.name}`);
       }
-      setTimeout(render, 100);
+      advance();
+    };
+
+    const ask = (bidder) => {
+      const reply = answer(bidder);
+      const payload = {
+        spaceId,
+        bid: state.bid,
+        leaderName: state.leader >= 0 ? game.players[state.leader].name : null,
+        bidderId: bidder.id,
+        bidderName: bidder.name,
+        money: bidder.money
+      };
+
+      if (bidder.isAI) {
+        const ai = game.getAI(bidder.id);
+        const bid = ai ? ai.decideAuctionBid(spaceId, state.bid, game) : 0;
+        return setTimeout(() => reply(bid > state.bid && bid <= bidder.money ? { bid } : 'pass'), 600);
+      }
+
+      MP.prompt(bidder.id, 'bid', payload, {
+        local: () => this.showBidModal(payload, reply),
+        onReply: reply
+      });
     };
 
     document.getElementById('modal-overlay').classList.add('active');
-    render();
+    ask(bidders[0]);
+  }
+
+  /* One bidder's turn. Drawn from the payload alone, so the same modal works
+     on the host and on a guest reading nothing but the question it was sent. */
+  showBidModal(payload, reply) {
+    const space = BOARD_SPACES[payload.spaceId];
+    const grp = space.group ? COLOR_GROUPS[space.group] : null;
+    const minBid = payload.bid + 10;
+
+    const html = `
+      <div class="auction-modal">
+        <h2>🔨 Auction: ${space.name}</h2>
+        <div class="auction-info">
+          <div class="current-bid">Current bid: <strong>$${payload.bid}</strong></div>
+          ${payload.leaderName ? `<div class="highest-bidder">Highest: <strong>${payload.leaderName}</strong></div>` : ''}
+          ${space.price ? `<div class="auction-list-price">List price: $${space.price}</div>` : ''}
+        </div>
+        <div class="bidder-turn" style="${grp ? `border-left:6px solid ${grp.color}` : ''}">
+          <strong>${payload.bidderName}'s</strong> turn to bid
+          (balance: $${(payload.money || 0).toLocaleString()})
+        </div>
+        <div class="bid-controls">
+          <input type="number" id="bid-amount" min="${minBid}" max="${payload.money}"
+                 value="${Math.min(minBid, payload.money)}" step="10" class="bid-input"
+                 aria-label="Your bid">
+          <button class="btn btn-success" id="bid-submit">Place bid</button>
+          <button class="btn btn-danger" id="bid-pass">Pass</button>
+        </div>
+      </div>`;
+
+    this.showModal(html);
+
+    document.getElementById('bid-submit')?.addEventListener('click', () => {
+      const amount = parseInt(document.getElementById('bid-amount').value, 10);
+      // A bid that cannot stand says why. Silently doing nothing makes a
+      // working button look broken, which is worse than a refusal.
+      if (!Number.isFinite(amount)) return this.showToast('Enter an amount to bid.', 'warning');
+      if (amount <= payload.bid) {
+        return this.showToast(`Bid more than $${payload.bid.toLocaleString()} to take the lead.`, 'warning');
+      }
+      if (amount > payload.money) {
+        return this.showToast(`${payload.bidderName} only has $${(payload.money || 0).toLocaleString()}.`, 'warning');
+      }
+      this.closeModal();
+      reply({ bid: amount });
+    });
+    document.getElementById('bid-pass')?.addEventListener('click', () => {
+      this.closeModal();
+      reply('pass');
+    });
+  }
+
+  /* A line for everyone else's log and toast area. On the host it goes out
+     over the wire; offline it is just a log entry. */
+  announce(text) {
+    this.addGameLog(text);
+    if (typeof MP !== 'undefined' && MP.note) MP.note(text);
   }
 
   showJailModal(player, onPay, onCard, onRoll) {
@@ -521,6 +640,10 @@ class UI {
     document.getElementById('jail-roll')?.addEventListener('click', () => { this.closeModal(); onRoll(); });
   }
 
+  /* Raising funds against a debt. This one has to survive the board changing
+   * underneath it — every sale and mortgage moves the numbers — so on a guest
+   * it is registered as sticky and redrawn whenever a snapshot lands.
+   */
   showRaiseFundsModal(playerId, amountOwed, creditorId, reason) {
     const game = this.game;
     const player = game.players[playerId];
@@ -541,15 +664,15 @@ class UI {
 
       const html = `
         <div class="raise-funds-modal">
-          <h2>⚠️ Raise Funds!</h2>
+          <h2>⚠️ Raise funds</h2>
           <div class="debt-info">
-            <div class="debt-amount">You owe <strong>$${amountOwed.toLocaleString()}</strong> to ${creditorName}</div>
+            <div class="debt-amount">${player.name} owes <strong>$${amountOwed.toLocaleString()}</strong> to ${creditorName}</div>
             <div class="debt-reason">${reason}</div>
-            <div class="debt-balance">Your cash: <strong>$${player.money.toLocaleString()}</strong></div>
+            <div class="debt-balance">Cash: <strong>$${player.money.toLocaleString()}</strong></div>
             ${!canPay ? `<div class="debt-deficit">Still need: <strong class="deficit-amount">$${deficit.toLocaleString()}</strong></div>` : ''}
           </div>
           <div class="raise-funds-actions">
-            ${sellable.length ? `<h3>Sell Buildings</h3><div class="build-list">${sellable.map(id => {
+            ${sellable.length ? `<h3>Sell buildings</h3><div class="build-list">${sellable.map(id => {
               const sp = BOARD_SPACES[id];
               const pr = game.state.properties[id];
               const val = Math.floor((sp.housePrice || 0) / 2);
@@ -557,7 +680,7 @@ class UI {
                 ${sp.name} (${pr.houses === 5 ? '🏨' : '🏠x' + pr.houses}) → +$${val}
               </button>`;
             }).join('')}</div>` : ''}
-            ${mortgageable.length ? `<h3>Mortgage Properties</h3><div class="build-list">${mortgageable.map(id => {
+            ${mortgageable.length ? `<h3>Mortgage properties</h3><div class="build-list">${mortgageable.map(id => {
               const sp = BOARD_SPACES[id];
               return `<button class="btn btn-danger build-action-btn" data-action="mortgage" data-id="${id}">
                 ${sp.name} → +$${sp.mortgage}
@@ -566,8 +689,8 @@ class UI {
             ${!sellable.length && !mortgageable.length ? '<p class="no-options">No more assets to liquidate.</p>' : ''}
           </div>
           <div class="deed-actions">
-            ${canPay ? `<button class="btn btn-success" id="debt-pay">✅ Pay $${amountOwed}</button>` : ''}
-            <button class="btn btn-danger" id="debt-bankrupt">💀 Declare Bankruptcy</button>
+            ${canPay ? `<button class="btn btn-success" id="debt-pay">✅ Pay $${amountOwed.toLocaleString()}</button>` : ''}
+            <button class="btn btn-danger" id="debt-bankrupt">💀 Declare bankruptcy</button>
           </div>
         </div>`;
 
@@ -578,9 +701,10 @@ class UI {
         btn.addEventListener('click', () => {
           const action = btn.dataset.action;
           const id = parseInt(btn.dataset.id);
-          if (action === 'sell') game.sellHouse(id);
-          else if (action === 'mortgage') game.mortgageProperty(id);
-          // Re-render to update amounts
+          if (action === 'sell') game.sellHouse(id, playerId);
+          else if (action === 'mortgage') game.mortgageProperty(id, playerId);
+          // Re-render to update amounts. On a guest nothing has changed yet —
+          // the host answers with a snapshot, which redraws this.
           render();
         });
       });
@@ -597,6 +721,7 @@ class UI {
     };
 
     document.getElementById('modal-overlay').classList.add('active');
+    this.setSticky('raiseFunds', render);
     render();
   }
 
@@ -621,34 +746,60 @@ class UI {
     });
   }
 
+  /* The trade builder.
+   *
+   * Two things changed here. It is no longer tied to whose turn it is — the
+   * proposer is picked, defaulting to the player to move when that is one of
+   * ours — and the answer is no longer the proposer's to give: the offer goes
+   * to the other player through the game, which asks the computer, the person
+   * at this screen, or the person at another one. */
   showTradeModal() {
     const game = this.game;
-    const currentPlayer = game.players[game.currentPlayer];
-    const otherPlayers = game.players.filter((p, i) => i !== game.currentPlayer && !p.bankrupt);
 
-    if (otherPlayers.length === 0) {
-      this.showToast('No other players to trade with!', 'warning');
+    if (typeof game.canTrade === 'function' && !game.canTrade()) {
+      this.showToast('Not a moment for a deal.', 'warning');
       return;
     }
 
-    let selectedPartner = otherPlayers[0].id;
+    const mine = this.seatsHere();
+    let proposerId = this.defaultTrader();
+    if (proposerId === null) {
+      this.showToast('There is nobody here to trade for.', 'warning');
+      return;
+    }
+
+    let selectedPartner = null;
     let offerProps = new Set();
     let receiveProps = new Set();
-    let offerMoney = 0;
-    let receiveMoney = 0;
     let offerJailCards = 0;
     let receiveJailCards = 0;
 
+    const partnersFor = (id) => game.players.filter(p => p.id !== id && !p.bankrupt);
+
     const render = () => {
+      const currentPlayer = game.players[proposerId];
+      const partners = partnersFor(proposerId);
+      if (!partners.length) {
+        this.showToast('No other players to trade with!', 'warning');
+        return this.closeModal();
+      }
+      if (selectedPartner === null || !partners.some(p => p.id === selectedPartner)) {
+        selectedPartner = partners[0].id;
+      }
       const partner = game.players[selectedPartner];
-      // Include ALL properties (mortgaged and unmortgaged), but exclude ones with buildings
-      const myProps = currentPlayer.properties.filter(id => {
+
+      const offerMoney = Math.max(0, parseInt(document.getElementById('offer-money')?.value, 10) || 0);
+      const receiveMoney = Math.max(0, parseInt(document.getElementById('receive-money')?.value, 10) || 0);
+
+      // Every deed either player holds, buildings excepted — a group with
+      // houses on it cannot be broken up.
+      const tradeable = (player) => player.properties.filter(id => {
+        const space = BOARD_SPACES[id];
         const prop = game.state.properties[id];
-        return (prop.houses || 0) === 0; // Can't trade properties with buildings
-      });
-      const partnerProps = partner.properties.filter(id => {
-        const prop = game.state.properties[id];
-        return (prop.houses || 0) === 0;
+        if ((prop.houses || 0) > 0) return false;
+        if (space.type !== 'property') return true;
+        return getGroupSpaces(space.group)
+          .every(sp => (game.state.properties[sp.id].houses || 0) === 0);
       });
 
       const makePropList = (props, checkClass, selectedSet) => props.map(id => {
@@ -661,20 +812,30 @@ class UI {
         </label>`;
       }).join('') || '<p class="no-props">No properties</p>';
 
+      const proposerPicker = mine.length > 1 ? `
+        <div class="trade-proposer-select">
+          Trading as:
+          ${mine.map(p => `
+            <button class="btn ${p.id === proposerId ? 'btn-primary' : 'btn-secondary'} proposer-btn" data-id="${p.id}">
+              ${p.token.emoji} ${p.name}
+            </button>`).join('')}
+        </div>` : '';
+
       const html = `
         <div class="trade-modal">
           <h2>🤝 Trade</h2>
+          ${proposerPicker}
           <div class="trade-partner-select">
             Trade with:
-            ${otherPlayers.map(p => `
+            ${partners.map(p => `
               <button class="btn ${p.id === selectedPartner ? 'btn-primary' : 'btn-secondary'} partner-btn" data-id="${p.id}">
-                ${p.token.emoji} ${p.name}
+                ${p.token.emoji} ${p.name}${p.isAI ? ' 🤖' : ''}
               </button>`).join('')}
           </div>
           <div class="trade-columns">
             <div class="trade-col">
-              <h3>${currentPlayer.name} Offers</h3>
-              <div class="trade-props">${makePropList(myProps, 'offer-prop', offerProps)}</div>
+              <h3>${currentPlayer.name} offers</h3>
+              <div class="trade-props">${makePropList(tradeable(currentPlayer), 'offer-prop', offerProps)}</div>
               ${currentPlayer.jailCards.length > 0 ? `
                 <div class="trade-jail-card">
                   <label class="prop-check">
@@ -683,12 +844,12 @@ class UI {
                   </label>
                 </div>` : ''}
               <div class="trade-money">
-                <label>Cash Offer: $<input type="number" id="offer-money" value="${offerMoney}" min="0" max="${currentPlayer.money}" step="10" class="money-input"></label>
+                <label>Cash offer: $<input type="number" id="offer-money" value="${offerMoney}" min="0" max="${currentPlayer.money}" step="10" class="money-input"></label>
               </div>
             </div>
             <div class="trade-col">
-              <h3>${partner.name} Offers</h3>
-              <div class="trade-props">${makePropList(partnerProps, 'receive-prop', receiveProps)}</div>
+              <h3>${partner.name} offers</h3>
+              <div class="trade-props">${makePropList(tradeable(partner), 'receive-prop', receiveProps)}</div>
               ${partner.jailCards.length > 0 ? `
                 <div class="trade-jail-card">
                   <label class="prop-check">
@@ -697,19 +858,30 @@ class UI {
                   </label>
                 </div>` : ''}
               <div class="trade-money">
-                <label>Cash Request: $<input type="number" id="receive-money" value="${receiveMoney}" min="0" max="${partner.money}" step="10" class="money-input"></label>
+                <label>Cash request: $<input type="number" id="receive-money" value="${receiveMoney}" min="0" max="${partner.money}" step="10" class="money-input"></label>
               </div>
             </div>
           </div>
           <div class="deed-actions">
-            <button class="btn btn-success" id="trade-confirm">Propose Trade</button>
+            <button class="btn btn-success" id="trade-confirm">Send offer</button>
             <button class="btn btn-secondary" id="trade-cancel">Cancel</button>
           </div>
         </div>`;
 
       document.getElementById('modal-content').innerHTML = html;
 
-      // Partner select
+      document.querySelectorAll('.proposer-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+          proposerId = parseInt(btn.dataset.id);
+          selectedPartner = null;
+          offerProps = new Set();
+          receiveProps = new Set();
+          offerJailCards = 0;
+          receiveJailCards = 0;
+          render();
+        });
+      });
+
       document.querySelectorAll('.partner-btn').forEach(btn => {
         btn.addEventListener('click', () => {
           selectedPartner = parseInt(btn.dataset.id);
@@ -721,28 +893,47 @@ class UI {
         });
       });
 
-      // Confirm trade
+      /* Selections used to be read only at the end, so switching sides threw
+         them away silently. They are kept as they are ticked instead. */
+      const remember = (cls, set) => {
+        document.querySelectorAll(cls).forEach(cb => {
+          cb.addEventListener('change', () => {
+            const id = parseInt(cb.value);
+            if (cb.checked) set.add(id); else set.delete(id);
+          });
+        });
+      };
+      remember('.offer-prop', offerProps);
+      remember('.receive-prop', receiveProps);
+
+      document.getElementById('offer-jail-card')?.addEventListener('change', (e) => {
+        offerJailCards = e.target.checked ? 1 : 0;
+      });
+      document.getElementById('receive-jail-card')?.addEventListener('change', (e) => {
+        receiveJailCards = e.target.checked ? 1 : 0;
+      });
+
       document.getElementById('trade-confirm').addEventListener('click', () => {
-        const newOfferProps = new Set([...document.querySelectorAll('.offer-prop:checked')].map(cb => parseInt(cb.value)));
-        const newReceiveProps = new Set([...document.querySelectorAll('.receive-prop:checked')].map(cb => parseInt(cb.value)));
-        const newOfferMoney = parseInt(document.getElementById('offer-money').value) || 0;
-        const newReceiveMoney = parseInt(document.getElementById('receive-money').value) || 0;
-        const newOfferJailCards = document.getElementById('offer-jail-card')?.checked ? 1 : 0;
-        const newReceiveJailCards = document.getElementById('receive-jail-card')?.checked ? 1 : 0;
+        const deal = {
+          fromId: proposerId,
+          toId: selectedPartner,
+          giveProps: [...offerProps],
+          getProps: [...receiveProps],
+          giveMoney: Math.max(0, parseInt(document.getElementById('offer-money').value, 10) || 0),
+          getMoney: Math.max(0, parseInt(document.getElementById('receive-money').value, 10) || 0),
+          giveJailCards: document.getElementById('offer-jail-card')?.checked ? 1 : 0,
+          getJailCards: document.getElementById('receive-jail-card')?.checked ? 1 : 0
+        };
 
-        if (newOfferMoney > currentPlayer.money) {
-          this.showToast("You don't have enough money!", 'error'); return;
-        }
-        if (newReceiveMoney > game.players[selectedPartner].money) {
-          this.showToast(`${partner.name} doesn't have enough money!`, 'error'); return;
+        const check = game.validateDeal ? game.validateDeal(deal) : { ok: true };
+        if (!check.ok) {
+          this.showToast(check.reason, 'warning');
+          return;
         }
 
-        this.showTradeConfirmModal(
-          currentPlayer, game.players[selectedPartner],
-          [...newOfferProps], [...newReceiveProps],
-          newOfferMoney, newReceiveMoney,
-          newOfferJailCards, newReceiveJailCards
-        );
+        this.closeModal();
+        this.showToast(`Offer sent to ${game.players[deal.toId].name}.`, 'info');
+        game.requestTrade(deal);
       });
       document.getElementById('trade-cancel').addEventListener('click', () => this.closeModal());
     };
@@ -751,30 +942,34 @@ class UI {
     render();
   }
 
-  showTradeConfirmModal(from, to, offerPropIds, receivePropIds, offerMoney, receiveMoney, offerJailCards = 0, receiveJailCards = 0) {
-    const fmt = (ids) => ids.map(id => BOARD_SPACES[id]?.name || id).join(', ') || 'Nothing';
+  /* What the other side of a deal sees. The person answering is the one being
+     offered to, wherever they are sitting. */
+  showTradeOfferModal(deal, onAccept, onDecline) {
+    const game = this.game;
+    const from = game.players[deal.fromId];
+    const to = game.players[deal.toId];
+    const name = (id) => BOARD_SPACES[id]?.name || id;
+    const mortgaged = (id) => game.state.properties[id]?.mortgaged ? ' 🔴' : '';
+
+    const side = (props, money, cards) => {
+      const lines = props.map(id => `<li>${name(id)}${mortgaged(id)}</li>`);
+      if (money > 0) lines.push(`<li>$${money.toLocaleString()}</li>`);
+      if (cards > 0) lines.push('<li>🃏 Get Out of Jail Free card</li>');
+      return lines.length ? lines.join('') : '<li>Nothing</li>';
+    };
+
     const html = `
       <div class="trade-confirm-modal">
-        <h2>Confirm Trade</h2>
+        <h2>🤝 ${from.name} offers ${to.name} a trade</h2>
         <div class="trade-summary">
           <div class="trade-side">
-            <h3>${from.name} gives:</h3>
-            <ul>
-              ${offerPropIds.map(id => `<li>${BOARD_SPACES[id]?.name}${this.game.state.properties[id]?.mortgaged ? ' 🔴' : ''}</li>`).join('')}
-              ${offerMoney > 0 ? `<li>$${offerMoney}</li>` : ''}
-              ${offerJailCards > 0 ? '<li>🃏 Get Out of Jail Free Card</li>' : ''}
-              ${offerPropIds.length === 0 && offerMoney === 0 && offerJailCards === 0 ? '<li>Nothing</li>' : ''}
-            </ul>
+            <h3>${to.name} receives:</h3>
+            <ul>${side(deal.giveProps || [], deal.giveMoney || 0, deal.giveJailCards || 0)}</ul>
           </div>
           <div class="trade-arrow">↔️</div>
           <div class="trade-side">
             <h3>${to.name} gives:</h3>
-            <ul>
-              ${receivePropIds.map(id => `<li>${BOARD_SPACES[id]?.name}${this.game.state.properties[id]?.mortgaged ? ' 🔴' : ''}</li>`).join('')}
-              ${receiveMoney > 0 ? `<li>$${receiveMoney}</li>` : ''}
-              ${receiveJailCards > 0 ? '<li>🃏 Get Out of Jail Free Card</li>' : ''}
-              ${receivePropIds.length === 0 && receiveMoney === 0 && receiveJailCards === 0 ? '<li>Nothing</li>' : ''}
-            </ul>
+            <ul>${side(deal.getProps || [], deal.getMoney || 0, deal.getJailCards || 0)}</ul>
           </div>
         </div>
         <div class="deed-actions">
@@ -782,31 +977,197 @@ class UI {
           <button class="btn btn-danger" id="trade-no">${to.name}: Decline</button>
         </div>
       </div>`;
-    document.getElementById('modal-content').innerHTML = html;
 
+    this.showModal(html);
     document.getElementById('trade-yes').addEventListener('click', () => {
-      this.game.executeTrade(from.id, to.id, offerPropIds, receivePropIds, offerMoney, receiveMoney, offerJailCards, receiveJailCards);
       this.closeModal();
+      onAccept();
     });
     document.getElementById('trade-no').addEventListener('click', () => {
       this.closeModal();
-      this.showToast(`${to.name} declined the trade.`, 'warning');
+      onDecline();
     });
   }
 
-  showGameOverModal(winner) {
+  /* The speed die's triple: any square on the board, so it is a list. */
+  showChooseSpaceModal(playerId, onPick) {
+    const game = this.game;
+    const player = game.players[playerId];
+    const options = BOARD_SPACES.map(space =>
+      `<option value="${space.id}">${space.id}. ${space.name}</option>`).join('');
+
+    const html = `
+      <div class="choose-space-modal">
+        <h2>🎲 Triple!</h2>
+        <p>${player.name} may move to any space on the board.</p>
+        <label class="choose-space-label">
+          Move to:
+          <select id="anywhere-space">${options}</select>
+        </label>
+        <div class="deed-actions">
+          <button class="btn btn-success" id="anywhere-go">Move there</button>
+        </div>
+      </div>`;
+
+    this.showModal(html);
+    document.getElementById('anywhere-go').addEventListener('click', () => {
+      const value = parseInt(document.getElementById('anywhere-space').value, 10);
+      this.closeModal();
+      onPick(value);
+    });
+  }
+
+  /* The end of the game, with the game itself attached: who bled whom, what
+     the dice did, and how the money actually ended up. A trophy and a reload
+     button threw all of that away. */
+  /* Conceding is irreversible, so it asks first — and says what it means: the
+     assets go to the bank, not to whoever you are losing to. */
+  showConcedeModal() {
+    const game = this.game;
+    const mine = this.seatsHere();
+    if (!mine.length) return;
+
+    const options = mine.map(p =>
+      `<option value="${p.id}">${p.token.emoji} ${p.name}</option>`).join('');
+
+    const html = `
+      <div class="concede-modal">
+        <h2>🏳️ Concede</h2>
+        <p>Everything owned goes back to the bank, and the game carries on
+           without them.</p>
+        ${mine.length > 1 ? `<label class="choose-space-label">Who is giving up?
+          <select id="concede-who">${options}</select></label>` : ''}
+        <div class="deed-actions">
+          <button class="btn btn-danger" id="concede-yes">Concede</button>
+          <button class="btn btn-secondary" id="concede-no">Keep playing</button>
+        </div>
+      </div>`;
+
+    this.showModal(html);
+    document.getElementById('concede-no').addEventListener('click', () => this.closeModal());
+    document.getElementById('concede-yes').addEventListener('click', () => {
+      const pick = document.getElementById('concede-who');
+      const id = pick ? parseInt(pick.value, 10) : mine[0].id;
+      this.closeModal();
+      game.concede(id);
+    });
+  }
+
+  /* What is different about this particular game, listed where the standard
+     rent numbers are. A house rule you cannot see is one you will argue about. */
+  renderRulesInForce() {
+    const box = document.getElementById('rules-in-force');
+    if (!box) return;
+    const o = this.game.options || {};
+    const lines = [];
+
+    if (o.freeParkingPot !== false) lines.push(['Free Parking pot', 'on']);
+    if (o.noAuctions) lines.push(['Auctions', 'off']);
+    if (o.exactGoBonus) lines.push(['Exact landing on GO', '$400']);
+    if (o.noRentInJail) lines.push(['Rent while in jail', 'none']);
+    if (o.shortGame) lines.push(['Short game', 'dealt 2 each']);
+    if (o.speedDie) lines.push(['Speed die', 'in play']);
+    if (o.startingCash && o.startingCash !== 1500) lines.push(['Starting cash', `$${o.startingCash}`]);
+    if (o.turnLimit) lines.push(['Round limit', String(o.turnLimit)]);
+    if (o.timeLimit) lines.push(['Time limit', `${o.timeLimit} min`]);
+    if (o.theme && o.theme !== 'classic' && typeof BOARD_THEMES !== 'undefined') {
+      lines.push(['Board', BOARD_THEMES[o.theme] ? BOARD_THEMES[o.theme].label : o.theme]);
+    }
+    if (!lines.length) lines.push(['Standard rules', '✓']);
+
+    box.innerHTML = lines
+      .map(([k, v]) => `<div class="ref-item"><span>${k}</span><span>${v}</span></div>`)
+      .join('');
+  }
+
+  showGameOverModal(winner, info = {}) {
+    const game = this.game;
+    const standings = info.standings || (game.standings ? game.standings() : []);
+    const stats = game.stats || { rolls: [], doubles: 0 };
+    const money = (n) => `$${(n || 0).toLocaleString()}`;
+
+    const rows = standings.map((entry, i) => {
+      const p = entry.player;
+      const st = entry.stats || {};
+      return `
+        <tr class="${p.bankrupt ? 'out' : ''} ${i === 0 && !p.bankrupt ? 'winner' : ''}">
+          <td>${p.bankrupt ? '—' : i + 1}</td>
+          <td><span class="score-token" style="background:${p.color}">${p.token.emoji}</span> ${p.name}${p.isAI ? ' 🤖' : ''}</td>
+          <td>${p.bankrupt ? (p.conceded ? 'Conceded' : 'Bankrupt') : money(entry.netWorth)}</td>
+          <td>${money(p.money)}</td>
+          <td>${p.properties.length}</td>
+          <td>${money(st.rentCollected)}</td>
+          <td>${money(st.rentPaid)}</td>
+          <td>${money(st.biggestRent)}</td>
+          <td>${st.housesBuilt || 0}</td>
+          <td>${st.timesInJail || 0}</td>
+        </tr>`;
+    }).join('');
+
+    // A dice histogram is a cheap way to settle the "these dice hate me"
+    // argument that every game of this ends in.
+    const rolls = stats.rolls || [];
+    const peak = Math.max(1, ...rolls.slice(2));
+    const histogram = rolls.map((count, total) => {
+      if (total < 2) return '';
+      return `<div class="roll-bar" title="${count} × ${total}">
+                <div class="roll-fill" style="height:${Math.round((count / peak) * 100)}%"></div>
+                <span class="roll-label">${total}</span>
+              </div>`;
+    }).join('');
+
+    const minutes = Math.max(1, Math.round((game.elapsedMs ? game.elapsedMs() : 0) / 60000));
+
     const html = `
       <div class="gameover-modal">
         <div class="trophy">🏆</div>
-        <h1>${winner.name} Wins!</h1>
-        <p style="color:${winner.color}; font-size:3rem">${winner.token.emoji}</p>
-        <p>Congratulations, Monopoly Champion!</p>
-        <button class="btn btn-primary" onclick="location.reload()">Play Again</button>
+        <h1>${winner.name} wins!</h1>
+        <p class="gameover-token" style="color:${winner.color}">${winner.token.emoji}</p>
+        <p class="gameover-reason">${info.reason ? `Won on ${info.reason}` : ''} ·
+           ${game.turnNumber || 0} rounds · ${minutes} min</p>
+
+        <div class="scoreboard-wrap">
+          <table class="scoreboard">
+            <thead>
+              <tr>
+                <th>#</th><th>Player</th><th>Net worth</th><th>Cash</th>
+                <th>Deeds</th><th>Rent in</th><th>Rent out</th><th>Biggest rent</th>
+                <th>Built</th><th>Jail</th>
+              </tr>
+            </thead>
+            <tbody>${rows}</tbody>
+          </table>
+        </div>
+
+        <div class="dice-histogram">
+          <div class="quick-ref-title">Dice rolled (${stats.doubles || 0} doubles)</div>
+          <div class="roll-bars">${histogram}</div>
+        </div>
+
+        <div class="deed-actions">
+          <button class="btn btn-primary" id="gameover-again">Play again</button>
+        </div>
       </div>`;
+
     this.showModal(html);
+    document.getElementById('gameover-again')?.addEventListener('click', () => {
+      if (typeof Save !== 'undefined') Save.clear();
+      location.reload();
+    });
   }
 
   addGameLog(message) {
+    /* The game keeps its own copy: it is what a guest is sent, and what a
+       saved game comes back with. The panel used to be the only record, so
+       both arrived empty. */
+    if (this.game && Array.isArray(this.game.log)) {
+      this.game.log.push(message);
+      if (this.game.log.length > 300) this.game.log.shift();
+    }
+    this.renderLogEntry(message);
+  }
+
+  renderLogEntry(message) {
     const log = document.getElementById('game-log');
     if (!log) return;
     const entry = document.createElement('div');
@@ -814,5 +1175,19 @@ class UI {
     entry.innerHTML = `<span class="log-time">${new Date().toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})}</span> ${message}`;
     log.insertBefore(entry, log.firstChild);
     if (log.children.length > 100) log.lastChild.remove();
+  }
+
+  /* A guest rebuilds the whole panel from the snapshot's log rather than
+     appending, because it only ever sees the last stretch of it. */
+  replaceGameLog(lines) {
+    const log = document.getElementById('game-log');
+    if (!log) return;
+    log.innerHTML = '';
+    (lines || []).slice().reverse().forEach(line => {
+      const entry = document.createElement('div');
+      entry.className = 'log-entry';
+      entry.innerHTML = line;
+      log.appendChild(entry);
+    });
   }
 }

@@ -679,10 +679,14 @@ html, body {
 
 /* ── Ownership dot ────────────────────────────────────────── */
 .owner-dot {
-  position: absolute; top: 3px; right: 3px;
-  width: 9px; height: 9px; border-radius: 50%;
+  position: absolute; top: 2px; right: 2px;
+  width: 13px; height: 13px; border-radius: 50%;
   border: 1.5px solid rgba(255,255,255,0.7);
   z-index: 5; box-shadow: 0 0 4px rgba(0,0,0,0.4);
+  /* The owner's token rides in the dot: colour alone is not enough to tell
+     four players apart if you cannot see all four colours. */
+  display: flex; align-items: center; justify-content: center;
+  font-size: 8px; line-height: 1;
 }
 
 .board-space.mortgaged { opacity: 0.45; }
@@ -1195,3 +1199,164 @@ canvas.die { border-radius: 8px; box-shadow: 0 3px 12px rgba(0,0,0,0.4); }
 /* Any class that sets `display` would otherwise out-specify the user-agent
    rule for [hidden] and leave the element on screen. */
 [hidden] { display: none !important; }
+
+
+/* ══════════════════════════════════════════════════════════════
+   HOUSE RULES, RESUME, THEMES  (setup screen)
+   ══════════════════════════════════════════════════════════ */
+.resume-banner {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  background: var(--bg-card2); border: 1px solid var(--gold-dark);
+  border-radius: 10px; padding: 10px 14px; margin-bottom: 14px;
+}
+.resume-text { display: flex; flex-direction: column; gap: 2px; text-align: left; }
+.resume-text strong { color: var(--gold); font-size: 0.9rem; }
+#resume-summary { color: var(--text-muted); font-size: 0.75rem; }
+.resume-actions { display: flex; gap: 6px; flex-shrink: 0; }
+
+.house-rules-summary {
+  cursor: pointer; font-weight: 600; color: var(--gold);
+  padding: 6px 0; list-style: none; user-select: none;
+}
+.house-rules-summary::-webkit-details-marker { display: none; }
+.house-rules-summary::before { content: '▸ '; }
+details[open] > .house-rules-summary::before { content: '▾ '; }
+
+.toggle-sublabel { color: var(--text-muted); font-size: 0.7rem; }
+
+.rule-row {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 10px; padding: 7px 2px; border-top: 1px solid var(--border);
+  font-size: 0.82rem;
+}
+.rule-row select, .persona-select {
+  background: var(--bg-card2); color: var(--text);
+  border: 1px solid var(--border-bright); border-radius: 7px;
+  padding: 5px 8px; font-family: inherit; font-size: 0.78rem;
+}
+.persona-select { max-width: 120px; }
+
+/* ══════════════════════════════════════════════════════════════
+   ACTIONS, DICE AND CHAT  (game screen)
+   ══════════════════════════════════════════════════════════ */
+.speed-die {
+  width: 72px; height: 72px; border-radius: 8px;
+  background: linear-gradient(135deg, #f8f8f8, #ddd); color: #1a1a2e;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 1.6rem; font-weight: 800;
+  box-shadow: 0 3px 12px rgba(0,0,0,0.4);
+}
+.speed-die.speed-symbol { font-size: 2rem; }
+
+.minor-actions { display: flex; gap: 6px; margin-top: 6px; }
+.minor-actions .btn { flex: 1; padding: 6px 8px; font-size: 0.72rem; }
+.btn-ghost {
+  background: transparent; color: var(--text-muted);
+  border: 1px solid var(--border-bright);
+}
+.btn-ghost:hover { color: var(--text); border-color: var(--gold-dark); }
+.btn-danger-ghost:hover { color: var(--danger); border-color: var(--danger); }
+
+.btn kbd, .quick-ref kbd {
+  font-family: 'Inter', monospace; font-size: 0.62rem;
+  border: 1px solid rgba(255,255,255,0.35); border-radius: 4px;
+  padding: 0 4px; margin-left: 4px; opacity: 0.75;
+}
+
+#chat-section {
+  border-top: 1px solid var(--border); flex-shrink: 0; height: 150px;
+  display: flex; flex-direction: column;
+}
+#chat-log {
+  flex: 1; overflow-y: auto; padding: 6px 10px;
+  font-size: 0.72rem; color: var(--text);
+}
+.chat-line { padding: 2px 0; line-height: 1.35; word-break: break-word; }
+.chat-who { color: var(--gold); font-weight: 600; }
+#chat-form { display: flex; gap: 6px; padding: 6px 8px; border-top: 1px solid var(--border); }
+#chat-input {
+  flex: 1; min-width: 0; background: var(--bg-card2); color: var(--text);
+  border: 1px solid var(--border-bright); border-radius: 7px;
+  padding: 5px 8px; font-family: inherit; font-size: 0.75rem;
+}
+.mp-name-input {
+  width: 100%; margin-top: 8px; text-align: center;
+  background: var(--bg-card2); color: var(--text);
+  border: 1px solid var(--border-bright); border-radius: 8px;
+  padding: 8px 10px; font-family: inherit;
+}
+
+/* ══════════════════════════════════════════════════════════════
+   MODALS ADDED LATER
+   ══════════════════════════════════════════════════════════ */
+.trade-proposer-select, .trade-partner-select { margin-bottom: 10px; }
+.trade-proposer-select .btn, .trade-partner-select .btn {
+  padding: 5px 10px; font-size: 0.78rem; margin: 2px;
+}
+.auction-list-price { color: var(--text-muted); font-size: 0.78rem; }
+
+.choose-space-label { display: block; margin: 12px 0; }
+.choose-space-label select {
+  width: 100%; margin-top: 6px; padding: 8px;
+  background: var(--bg-card2); color: var(--text);
+  border: 1px solid var(--border-bright); border-radius: 8px;
+  font-family: inherit;
+}
+
+.concede-modal p, .shortcuts-modal p { color: var(--text-muted); margin: 10px 0; }
+
+/* Final scoreboard */
+.gameover-token { font-size: 3rem; margin: 4px 0; }
+.gameover-reason { color: var(--text-muted); font-size: 0.85rem; margin-bottom: 12px; }
+.scoreboard-wrap { max-width: 100%; overflow-x: auto; }
+.scoreboard {
+  width: 100%; border-collapse: collapse; font-size: 0.75rem;
+  margin: 8px 0 14px; white-space: nowrap;
+}
+.scoreboard th, .scoreboard td {
+  padding: 6px 8px; text-align: right; border-bottom: 1px solid var(--border);
+}
+.scoreboard th:nth-child(2), .scoreboard td:nth-child(2) { text-align: left; }
+.scoreboard th { color: var(--text-muted); font-weight: 600; }
+.scoreboard tr.winner td { color: var(--gold); font-weight: 700; }
+.scoreboard tr.out td { opacity: 0.5; }
+.score-token {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 20px; height: 20px; border-radius: 50%; margin-right: 5px;
+  font-size: 0.75rem;
+}
+
+.dice-histogram { margin-top: 6px; }
+.roll-bars {
+  display: flex; align-items: flex-end; gap: 4px; height: 70px;
+  padding: 6px 2px 0;
+}
+.roll-bar {
+  flex: 1; display: flex; flex-direction: column; justify-content: flex-end;
+  align-items: center; height: 100%;
+}
+.roll-fill {
+  width: 100%; background: linear-gradient(180deg, var(--gold-light), var(--gold-dark));
+  border-radius: 3px 3px 0 0; min-height: 2px;
+}
+.roll-label { font-size: 0.6rem; color: var(--text-muted); margin-top: 3px; }
+
+/* ══════════════════════════════════════════════════════════════
+   ACCESSIBILITY
+   ══════════════════════════════════════════════════════════ */
+/* Every focusable thing says so. The board is keyboard-reachable now, and an
+   invisible focus ring would make that useless. */
+:focus-visible {
+  outline: 3px solid var(--gold-light);
+  outline-offset: 2px;
+}
+.board-space:focus-visible { outline-offset: -3px; z-index: 20; }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+  .player-token.hop { animation: none !important; }
+}

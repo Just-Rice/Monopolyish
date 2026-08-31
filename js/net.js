@@ -44,7 +44,8 @@
     ASK: "ask",           // host -> one guest, "answer this for me"
     REPLY: "reply",       // guest -> host, the answer
     PING: "ping",         // both ways, liveness
-    REJECT: "reject"      // host -> guest, intent refused (with a reason)
+    REJECT: "reject",     // host -> guest, intent refused (with a reason)
+    CHAT: "chat"          // both ways, a line of table talk
   };
 
   /* ------------------------------------------------------------------ host */
@@ -56,9 +57,13 @@
     var onPeerChange = opts.onPeerChange || function () {};
     var onReject = opts.onReject || function () {};
 
-    var peers = {};        // peerId -> { name, seatId, ready, lastSeen }
+    var peers = {};        // peerId -> { name, clientId, seatId, ready, lastSeen }
     var paused = false;
     var pausedFor = null;
+    /* clientId -> seatId. A reconnecting player arrives on a brand new peer
+       id, so without this they are a stranger and their seat is up for grabs
+       by whoever asks first. */
+    var seatClaims = {};
 
     // A closed tab does not reliably fire a data-channel close event —
     // especially on mobile — so liveness is tracked by heartbeat instead of
@@ -137,12 +142,41 @@
 
       if (msg.t === M.HELLO) {
         peers[peerId].name = String(msg.name || "Guest").slice(0, 20);
+        peers[peerId].clientId = msg.clientId || null;
+
+        /* Somebody coming back: if the seat they had is still empty it is
+           still theirs, and the game can carry on where it stopped. */
+        var previous = msg.clientId ? seatClaims[msg.clientId] : undefined;
+        var reclaimed = false;
+        if (previous !== undefined && seatOwner(previous) === null) {
+          peers[peerId].seatId = previous;
+          peers[peerId].ready = true;
+          reclaimed = true;
+          if (paused && pausedFor === previous) {
+            paused = false;
+            pausedFor = null;
+            transport.broadcast({ t: M.RESUMED });
+            if (opts.onResumed) opts.onResumed(previous);
+          }
+          if (opts.onReclaimed) opts.onReclaimed(previous, peers[peerId].name);
+        }
+
         transport.send(peerId, {
-          t: M.WELCOME, protocol: PROTOCOL, seats: seatsPayload()
+          t: M.WELCOME, protocol: PROTOCOL, seats: seatsPayload(),
+          seatId: reclaimed ? previous : null
         });
         // A guest arriving mid-game should see the board immediately.
         transport.send(peerId, { t: M.SNAPSHOT, snap: game.getSnapshot() });
         pushSeats();
+        return;
+      }
+
+      if (msg.t === M.CHAT) {
+        var from = peers[peerId].name || "Guest";
+        var line = String(msg.text || "").slice(0, 200);
+        if (!line) return;
+        if (opts.onChat) opts.onChat(from, line);
+        transport.broadcast({ t: M.CHAT, from: from, text: line });
         return;
       }
 
@@ -158,6 +192,7 @@
         }
         peers[peerId].seatId = seatId;
         peers[peerId].ready = false;   // a fresh seat has to be confirmed
+        if (peers[peerId].clientId) seatClaims[peers[peerId].clientId] = seatId;
 
         // If this fills the seat we were waiting on, play can carry on.
         if (paused && pausedFor === seatId) {
@@ -236,6 +271,15 @@
                                  kind: question.kind, payload: question.payload });
       },
 
+      chat: function (from, text) {
+        transport.broadcast({ t: M.CHAT, from: from, text: String(text).slice(0, 200) });
+      },
+
+      /* Which seat this client had, if it has been here before. */
+      seatForClient: function (clientId) {
+        return clientId && seatClaims[clientId] !== undefined ? seatClaims[clientId] : null;
+      },
+
       announceRoll: function (result) {
         transport.broadcast({ t: M.ROLL, result: result });
       },
@@ -282,8 +326,10 @@
     var hostLost = false;
     var gaveUp = false;
 
+    var clientId = opts.clientId || null;
+
     transport.onPeerJoin(function () {
-      transport.broadcast({ t: M.HELLO, name: name });
+      transport.broadcast({ t: M.HELLO, name: name, clientId: clientId });
     });
 
     transport.onMessage(function (peerId, msg) {
@@ -308,7 +354,15 @@
             opts.onVersionMismatch(msg.protocol, PROTOCOL);
             return;
           }
+          // The host may have handed our old seat straight back to us.
+          if (msg.seatId !== null && msg.seatId !== undefined) {
+            mySeat = msg.seatId;
+            if (opts.onSeatRestored) opts.onSeatRestored(msg.seatId);
+          }
           if (opts.onSeats) opts.onSeats(msg.seats);
+          break;
+        case M.CHAT:
+          if (opts.onChat) opts.onChat(msg.from, msg.text);
           break;
         case M.SEATS:
           // Track our own seat as the host sees it, not as we asked for it.
@@ -337,7 +391,12 @@
 
     return {
       isHost: false,
-      hello: function () { transport.broadcast({ t: M.HELLO, name: name }); },
+      hello: function () {
+        transport.broadcast({ t: M.HELLO, name: name, clientId: clientId });
+      },
+      chat: function (text) {
+        transport.broadcast({ t: M.CHAT, text: String(text).slice(0, 200) });
+      },
       claim: function (seatId) {
         mySeat = seatId;
         transport.broadcast({ t: M.CLAIM, seatId: seatId });

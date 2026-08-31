@@ -39,16 +39,108 @@
       <span>Spectator Mode — sit back and watch the AIs battle it out!</span>
     </div>
 
-    <div class="setup-options">
+    <div class="resume-banner" id="resume-banner" hidden>
+      <div class="resume-text">
+        <strong>Saved game</strong>
+        <span id="resume-summary"></span>
+      </div>
+      <div class="resume-actions">
+        <button class="seat-btn" id="btn-resume">Resume</button>
+        <button class="seat-btn ghost" id="btn-discard-save">Discard</button>
+      </div>
+    </div>
+
+    <details class="setup-options" id="house-rules">
+      <summary class="house-rules-summary">⚙️ House rules &amp; board</summary>
+
       <label class="toggle-option">
-        <span class="toggle-label">🅿️ Free Parking Pot</span>
-        <span class="toggle-sublabel">(House Rule)</span>
+        <span class="toggle-label">🅿️ Free Parking pot</span>
+        <span class="toggle-sublabel">Fines and taxes pile up under Free Parking</span>
         <label class="toggle-switch">
           <input type="checkbox" id="free-parking-toggle" checked>
           <span class="toggle-slider"></span>
         </label>
       </label>
-    </div>
+
+      <label class="toggle-option">
+        <span class="toggle-label">🔨 No auctions</span>
+        <span class="toggle-sublabel">A declined property stays with the bank</span>
+        <label class="toggle-switch">
+          <input type="checkbox" id="no-auctions-toggle">
+          <span class="toggle-slider"></span>
+        </label>
+      </label>
+
+      <label class="toggle-option">
+        <span class="toggle-label">💰 Double salary on GO</span>
+        <span class="toggle-sublabel">Landing exactly on GO pays $400</span>
+        <label class="toggle-switch">
+          <input type="checkbox" id="exact-go-toggle">
+          <span class="toggle-slider"></span>
+        </label>
+      </label>
+
+      <label class="toggle-option">
+        <span class="toggle-label">🔒 No rent from jail</span>
+        <span class="toggle-sublabel">A landlord behind bars collects nothing</span>
+        <label class="toggle-switch">
+          <input type="checkbox" id="no-rent-jail-toggle">
+          <span class="toggle-slider"></span>
+        </label>
+      </label>
+
+      <label class="toggle-option">
+        <span class="toggle-label">⚡ Short game</span>
+        <span class="toggle-sublabel">Two properties dealt to each player, 40 rounds</span>
+        <label class="toggle-switch">
+          <input type="checkbox" id="short-game-toggle">
+          <span class="toggle-slider"></span>
+        </label>
+      </label>
+
+      <label class="toggle-option">
+        <span class="toggle-label">🎲 Speed die</span>
+        <span class="toggle-sublabel">Third die: Mr. Monopoly, the bus, and triples</span>
+        <label class="toggle-switch">
+          <input type="checkbox" id="speed-die-toggle">
+          <span class="toggle-slider"></span>
+        </label>
+      </label>
+
+      <div class="rule-row">
+        <label for="starting-cash">Starting cash</label>
+        <select id="starting-cash">
+          <option value="1000">$1,000 — lean</option>
+          <option value="1500" selected>$1,500 — standard</option>
+          <option value="2500">$2,500 — generous</option>
+        </select>
+      </div>
+
+      <div class="rule-row">
+        <label for="turn-limit">Round limit</label>
+        <select id="turn-limit">
+          <option value="0" selected>None — last player standing</option>
+          <option value="20">20 rounds</option>
+          <option value="40">40 rounds</option>
+          <option value="60">60 rounds</option>
+        </select>
+      </div>
+
+      <div class="rule-row">
+        <label for="time-limit">Time limit</label>
+        <select id="time-limit">
+          <option value="0" selected>None</option>
+          <option value="20">20 minutes</option>
+          <option value="45">45 minutes</option>
+          <option value="90">90 minutes</option>
+        </select>
+      </div>
+
+      <div class="rule-row">
+        <label for="board-theme">Board</label>
+        <select id="board-theme"><!-- filled by JS --></select>
+      </div>
+    </details>
 
     <div class="setup-panel" id="panel-person">
       <button class="btn-start" id="btn-start-game">🎲 Start Game</button>
@@ -69,6 +161,8 @@
       <div id="join-row" hidden>
         <input id="join-code" class="mp-code-input" maxlength="9" placeholder="ROOM CODE"
                autocomplete="off" spellcheck="false">
+        <input id="join-name" class="mp-name-input" maxlength="20" placeholder="Your name"
+               autocomplete="off">
       </div>
 
       <p class="online-note" id="online-note">
@@ -111,6 +205,7 @@
     <p class="lobby-status" id="mp-pause-note"></p>
     <div class="pause-actions">
       <button class="seat-btn" id="mp-pause-continue" style="display:none">Back to the lobby</button>
+      <button class="seat-btn" id="mp-pause-retry" style="display:none">Try to reconnect</button>
       <button class="btn-lobby-back" id="mp-pause-leave">Leave game</button>
     </div>
   </div>
@@ -127,8 +222,19 @@
     <div id="player-panels"></div>
 
     <div id="game-log-section">
-      <div class="panel-title">Game Log</div>
-      <div id="game-log"></div>
+      <div class="panel-title">Game log</div>
+      <div id="game-log" role="log" aria-live="polite" aria-relevant="additions"
+           aria-label="Game log"></div>
+    </div>
+
+    <div id="chat-section" hidden>
+      <div class="panel-title">Table talk</div>
+      <div id="chat-log" role="log" aria-live="polite" aria-label="Chat"></div>
+      <form id="chat-form" autocomplete="off">
+        <input id="chat-input" maxlength="200" placeholder="Say something…"
+               aria-label="Chat message">
+        <button class="seat-btn" type="submit">Send</button>
+      </form>
     </div>
   </aside>
 
@@ -156,18 +262,25 @@
     <div class="dice-section">
       <div class="dice-label">Roll the Dice</div>
       <div class="dice-display">
-        <canvas id="dice1" class="die" width="72" height="72"></canvas>
-        <canvas id="dice2" class="die" width="72" height="72"></canvas>
+        <canvas id="dice1" class="die" width="72" height="72" aria-hidden="true"></canvas>
+        <canvas id="dice2" class="die" width="72" height="72" aria-hidden="true"></canvas>
+        <div id="dice-speed" class="die speed-die" hidden aria-hidden="true"></div>
       </div>
-      <div class="doubles-indicator" id="doubles-indicator"></div>
+      <div class="doubles-indicator" id="doubles-indicator" aria-live="polite"></div>
     </div>
 
     <!-- Action Buttons -->
     <div class="actions-section">
-      <button class="btn btn-gold" id="btn-roll">🎲 Roll Dice</button>
-      <button class="btn btn-success" id="btn-end-turn" disabled>✅ End Turn</button>
-      <button class="btn btn-primary" id="btn-build" disabled>🏗️ Manage Properties</button>
-      <button class="btn btn-secondary" id="btn-trade" disabled>🤝 Trade</button>
+      <button class="btn btn-gold" id="btn-roll" accesskey="r">🎲 Roll dice <kbd>R</kbd></button>
+      <button class="btn btn-success" id="btn-end-turn" disabled>✅ End turn <kbd>E</kbd></button>
+      <button class="btn btn-primary" id="btn-build" disabled>🏗️ Manage property <kbd>B</kbd></button>
+      <button class="btn btn-secondary" id="btn-trade" disabled>🤝 Trade <kbd>T</kbd></button>
+      <div class="minor-actions">
+        <button class="btn btn-ghost" id="btn-sound" aria-pressed="false"
+                aria-label="Toggle sound">🔊</button>
+        <button class="btn btn-ghost" id="btn-help" aria-label="Keyboard shortcuts">⌨️</button>
+        <button class="btn btn-ghost btn-danger-ghost" id="btn-concede">🏳️ Concede</button>
+      </div>
     </div>
 
     <!-- Free Parking Pot -->
@@ -178,7 +291,9 @@
 
     <!-- Quick Reference -->
     <div class="quick-ref">
-      <div class="quick-ref-title">Quick Reference</div>
+      <div class="quick-ref-title">This game</div>
+      <div id="rules-in-force"></div>
+      <div class="quick-ref-title">Quick reference</div>
       <div class="ref-item"><span>Pass GO</span><span>Collect $200</span></div>
       <div class="ref-item"><span>Income Tax</span><span>Pay $200</span></div>
       <div class="ref-item"><span>Luxury Tax</span><span>Pay $100</span></div>
@@ -202,7 +317,7 @@
 <!-- ══════════════════════════════════════════════════════════
      TOASTS
 ══════════════════════════════════════════════════════════ -->
-<div id="toast-container"></div>
+<div id="toast-container" role="status" aria-live="polite"></div>
 
 
 <script src="js/property.js"></script>

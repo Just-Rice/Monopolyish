@@ -57,10 +57,17 @@ function buildSpace(space, side) {
       </div>`;
   }
 
+  /* Squares you can act on are focusable and announce themselves; the rest are
+     plain cells. Without this the board was a picture as far as a screen
+     reader or a keyboard was concerned. */
+  const interactive = ['property', 'railroad', 'utility'].includes(space.type);
   return `<div class="board-space type-${space.type} ${isCorner ? 'corner' : ''} side-${side}"
                data-space="${space.id}"
                data-type="${space.type}"
                ${space.group ? `data-group="${space.group}"` : ''}
+               role="gridcell"
+               ${interactive ? 'tabindex="0"' : ''}
+               aria-label="${space.name}"
                title="${space.name}">
       ${innerContent}
       <div class="token-container"></div>
@@ -69,6 +76,10 @@ function buildSpace(space, side) {
 
 function renderBoard(container) {
   container.innerHTML = '';
+  if (container.setAttribute) {
+    container.setAttribute('role', 'grid');
+    container.setAttribute('aria-label', 'Monopoly board');
+  }
 
   // Compute grid positions for all 40 spaces
   // Bottom row: GO(0) at col 10, ..., Jail(10) at col 0 → row 10
@@ -114,11 +125,12 @@ function renderBoard(container) {
   center.className = 'board-center-area';
   center.style.gridColumn = '2 / 11';
   center.style.gridRow = '2 / 11';
+  const theme = (typeof BOARD_THEMES !== 'undefined' && BOARD_THEMES.classic) || null;
   center.innerHTML = `
     <div class="board-center">
       <div class="board-logo">🎩</div>
-      <div class="board-title">MONOPOLY</div>
-      <div class="board-subtitle">Classic Edition</div>
+      <div class="board-title" id="board-theme-title">${theme ? theme.title : 'MONOPOLY'}</div>
+      <div class="board-subtitle" id="board-theme-subtitle">${theme ? theme.subtitle : 'Classic Edition'}</div>
     </div>`;
   container.appendChild(center);
 }

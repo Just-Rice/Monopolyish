@@ -5,33 +5,35 @@
 //  PLAYER STATE MANAGEMENT
 // ============================================================
 
-// Full pool of selectable tokens
+/* Full pool of selectable tokens.
+ *
+ * The default colours are the Okabe-Ito set, which stays distinguishable to
+ * the common forms of colour blindness — the old palette had a red, a salmon
+ * and a pink in it, and ownership on the board is shown by colour. Anyone who
+ * wants the old look can still pick any colour they like at setup, and the
+ * board marks each deed with the owner's token as well as their colour. */
 const ALL_TOKENS = [
-  { name: 'Hat',        emoji: '🎩', color: '#FF6B6B' },
-  { name: 'Car',        emoji: '🚗', color: '#4ECDC4' },
-  { name: 'Dog',        emoji: '🐕', color: '#FFE66D' },
-  { name: 'Battleship', emoji: '🚢', color: '#A8E6CF' },
-  { name: 'Cat',        emoji: '🐈', color: '#C9B1FF' },
-  { name: 'Boot',       emoji: '👢', color: '#FFA07A' },
-  { name: 'Iron',       emoji: '♟️', color: '#87CEFA' },
-  { name: 'Rocket',     emoji: '🚀', color: '#FF85C2' },
-  { name: 'Star',       emoji: '⭐', color: '#FFD700' },
-  { name: 'Diamond',    emoji: '💎', color: '#40E0D0' },
-  { name: 'Crown',      emoji: '👑', color: '#FFB347' },
-  { name: 'Dragon',     emoji: '🐉', color: '#98FB98' },
+  { name: 'Hat',        emoji: '🎩', color: '#E69F00' },  // orange
+  { name: 'Car',        emoji: '🚗', color: '#56B4E9' },  // sky blue
+  { name: 'Dog',        emoji: '🐕', color: '#009E73' },  // bluish green
+  { name: 'Battleship', emoji: '🚢', color: '#F0E442' },  // yellow
+  { name: 'Cat',        emoji: '🐈', color: '#0072B2' },  // blue
+  { name: 'Boot',       emoji: '👢', color: '#D55E00' },  // vermillion
+  { name: 'Iron',       emoji: '♟️', color: '#CC79A7' },  // reddish purple
+  { name: 'Rocket',     emoji: '🚀', color: '#8C8C8C' },  // grey
+  { name: 'Star',       emoji: '⭐', color: '#DDCC77' },  // sand
+  { name: 'Diamond',    emoji: '💎', color: '#44AA99' },  // teal
+  { name: 'Crown',      emoji: '👑', color: '#882255' },  // wine
+  { name: 'Dragon',     emoji: '🐉', color: '#117733' },  // forest
 ];
 
 // Default assignments (first 4)
 const TOKENS = ALL_TOKENS.slice(0, 4);
 
-const PLAYER_COLORS = [
-  '#FF6B6B', // red
-  '#4ECDC4', // teal
-  '#FFE66D', // yellow
-  '#A8E6CF', // mint
-];
+const PLAYER_COLORS = ALL_TOKENS.slice(0, 4).map(t => t.color);
 
-function createPlayer(index, name, customToken, isAI = false, aiDifficulty = null) {
+function createPlayer(index, name, customToken, isAI = false, aiDifficulty = null,
+                     aiPersonality = null) {
   const token = customToken || TOKENS[index];
   return {
     id: index,
@@ -46,8 +48,10 @@ function createPlayer(index, name, customToken, isAI = false, aiDifficulty = nul
     bankrupt: false,
     properties: [],
     doublesCount: 0,
+    conceded: false,
     isAI: isAI,
-    aiDifficulty: aiDifficulty, // 'easy' | 'medium' | 'hard' | null
+    aiDifficulty: aiDifficulty,   // 'easy' | 'medium' | 'hard' | null
+    aiPersonality: aiPersonality, // a key of AI_PERSONALITIES, or null for pot luck
   };
 }
 
@@ -56,7 +60,8 @@ function createPlayers(names, tokens, aiConfigs) {
     i, name,
     tokens ? tokens[i] : null,
     aiConfigs ? aiConfigs[i]?.isAI : false,
-    aiConfigs ? aiConfigs[i]?.difficulty : null
+    aiConfigs ? aiConfigs[i]?.difficulty : null,
+    aiConfigs ? aiConfigs[i]?.personality : null
   ));
 }
 

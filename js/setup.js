@@ -68,6 +68,13 @@
             <button class="diff-btn ${pt.difficulty === 'medium' || !pt.difficulty ? 'active' : ''}" data-player="${i}" data-diff="medium">Med</button>
             <button class="diff-btn ${pt.difficulty === 'hard' ? 'active' : ''}" data-player="${i}" data-diff="hard">Hard</button>
           </div>
+          <select class="persona-select" data-player="${i}" aria-label="Computer personality">
+            <option value="">Surprise me</option>
+            ${aiPersonalityKeys().map(key => `
+              <option value="${key}" ${pt.personality === key ? 'selected' : ''}
+                      title="${AI_PERSONALITIES[key].blurb}">${AI_PERSONALITIES[key].label}</option>
+            `).join('')}
+          </select>
         ` : ''}`;
       container.appendChild(row);
     }
@@ -85,6 +92,16 @@
         renderPlayerInputs(playerCount);
         attachTokenPickerEvents();
       });
+    });
+
+    // Personality picker
+    document.querySelectorAll('.persona-select').forEach(sel => {
+      sel.addEventListener('change', (e) => {
+        e.stopPropagation();
+        const idx = parseInt(sel.dataset.player);
+        playerTypes[idx].personality = sel.value || null;
+      });
+      sel.addEventListener('click', (e) => e.stopPropagation());
     });
 
     // Difficulty button events
@@ -215,7 +232,31 @@
   /* Building the game is its own function so the online lobby can start it
      directly. Synthesising a click on the button re-entered the online
      handler and re-hosted the room, which dropped everybody already in it. */
-  function startLocalGame() {
+  /* Everything the house-rules panel is currently set to. One place, so the
+     same options reach a local game, a hosted game and a saved one. */
+  function readOptions() {
+    const on = (id) => !!document.getElementById(id)?.checked;
+    const num = (id, fallback) => {
+      const value = parseInt(document.getElementById(id)?.value, 10);
+      return Number.isFinite(value) ? value : fallback;
+    };
+    const shortGame = on('short-game-toggle');
+    return {
+      freeParkingPot: on('free-parking-toggle'),
+      noAuctions: on('no-auctions-toggle'),
+      exactGoBonus: on('exact-go-toggle'),
+      noRentInJail: on('no-rent-jail-toggle'),
+      shortGame,
+      speedDie: on('speed-die-toggle'),
+      startingCash: num('starting-cash', 1500),
+      // The short game brings its own limit, unless one is already set.
+      turnLimit: num('turn-limit', 0) || (shortGame ? 40 : 0),
+      timeLimit: num('time-limit', 0),
+      theme: document.getElementById('board-theme')?.value || 'classic'
+    };
+  }
+
+  function buildGame(options, saved) {
     const names = [];
     const tokens = [];
     const aiConfigs = [];
@@ -231,16 +272,21 @@
       tokens.push(token);
       aiConfigs.push({
         isAI: pt.isAI,
-        difficulty: pt.isAI ? (pt.difficulty || 'medium') : null
+        difficulty: pt.isAI ? (pt.difficulty || 'medium') : null,
+        personality: pt.isAI ? (pt.personality || null) : null
       });
     }
-
-    const freeParkingEnabled = document.getElementById('free-parking-toggle').checked;
 
     document.getElementById('setup-screen').style.display = 'none';
     document.getElementById('game-screen').classList.add('active');
 
-    game = new Game(names, tokens, { freeParkingPot: freeParkingEnabled, aiConfigs });
+    applyBoardTheme(options.theme);
+
+    game = new Game(saved ? saved.players.map(p => p.name) : names,
+                    saved ? saved.players.map(p => p.token) : tokens,
+                    Object.assign({}, options, { aiConfigs }));
+    if (saved) Save.apply(game, saved);
+
     game.init();
 
     // Init dice faces
@@ -249,14 +295,57 @@
 
     // Update parking pot display (hide if disabled)
     const potSection = document.getElementById('parking-pot-section');
-    if (potSection && !freeParkingEnabled) {
+    if (potSection && game.useFreeParkingPot === false) {
       potSection.style.display = 'none';
     }
     updateParkingPot();
     window._game = game;
+    return game;
   }
 
-  document.getElementById('btn-start-game').addEventListener('click', startLocalGame);
+  function startLocalGame() {
+    return buildGame(readOptions(), null);
+  }
+
+  /* Picking up where a closed tab left off. The saved options come with it, so
+     the panel's current settings are not applied on top. */
+  function resumeSavedGame() {
+    const saved = Save.read();
+    if (!saved) return null;
+    playerCount = saved.players.length;
+    playerTypes = saved.players.map(p => ({
+      isAI: p.isAI, difficulty: p.aiDifficulty, personality: p.aiPersonality
+    }));
+    playerColors = saved.players.map(p => p.color);
+    selectedTokens = saved.players.map((p, i) => i);
+    return buildGame(Object.assign({}, saved.options), saved);
+  }
+
+  document.getElementById('btn-start-game').addEventListener('click', () => startLocalGame());
+
+  // ── Board themes, personalities and the saved game ────────
+  document.addEventListener('DOMContentLoaded', () => {
+    const themeSelect = document.getElementById('board-theme');
+    if (themeSelect && typeof BOARD_THEMES !== 'undefined') {
+      themeSelect.innerHTML = boardThemeKeys()
+        .map(key => `<option value="${key}">${BOARD_THEMES[key].label}</option>`)
+        .join('');
+    }
+
+    const banner = document.getElementById('resume-banner');
+    const saved = typeof Save !== 'undefined' ? Save.read() : null;
+    if (banner && saved) {
+      const summary = Save.summary(saved);
+      banner.hidden = false;
+      const line = document.getElementById('resume-summary');
+      if (line) line.textContent = `${summary.players} · ${summary.text}`;
+      document.getElementById('btn-resume')?.addEventListener('click', () => resumeSavedGame());
+      document.getElementById('btn-discard-save')?.addEventListener('click', () => {
+        Save.clear();
+        banner.hidden = true;
+      });
+    }
+  });
 
   // ── Parking Pot live update ──────────────────────────────
   function updateParkingPot() {

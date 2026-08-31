@@ -5,16 +5,12 @@
  * every change and render a read-only mirror, then send intents for their own
  * turn. Two boards therefore cannot drift apart.
  *
- * What is routed to remote players in this version:
- *   - the turn loop: roll, end turn
- *   - buy or auction, jail options, card acknowledgement
- *
- * What is NOT yet routed, and is resolved on the host:
- *   - auction bidding, which is a live multi-round loop rather than a question
- *   - trades, which are a two-sided builder
- *   - raising funds during bankruptcy
- * Those are deliberately left until the foundation here has been play-tested.
- * MP.hostOnlyPrompt() marks each one so they are easy to find.
+ * Everything a player is asked is routed the same way, through MP.prompt: the
+ * turn loop, buy or auction, jail, cards, one round of an auction, a trade
+ * offer, the choice of square after a triple, and raising funds against a
+ * debt. The flows that are conversations rather than single questions —
+ * auctions and debts — are broken into a question per round, which is what
+ * lets them cross the wire at all.
  */
 "use strict";
 
@@ -168,6 +164,10 @@ MP.buildMirror = function (snap) {
     currentPlayer: snap.currentPlayer,
     phase: snap.phase,
     lastRoll: snap.lastRoll,
+    turnNumber: snap.turnNumber,
+    options: snap.rules || {},
+    over: !!snap.over,
+    stats: snap.stats || null,
     log: snap.log,
     mine: function () { return MP.controls(snap.currentPlayer); },
     canRoll: function () {
@@ -178,32 +178,73 @@ MP.buildMirror = function (snap) {
       return mirror.mine() && (snap.phase === 'action' || snap.phase === 'rolled');
     },
     getAI: function () { return null; },
-    /* Anything a guest tries to do locally becomes an intent instead. */
+    elapsedMs: function () { return 0; },
+
+    /* Anything a guest tries to do locally becomes an intent instead. The
+       signatures match the real Game's, because the same UI code calls both. */
     purchaseProperty: function () { MP.send({ kind: 'buy' }); },
-    buildHouse:       function (pid, sid) { MP.send({ kind: 'build', spaceId: sid }); },
-    sellHouse:        function (pid, sid) { MP.send({ kind: 'sell', spaceId: sid }); },
-    mortgageProperty: function (pid, sid) { MP.send({ kind: 'mortgage', spaceId: sid }); },
-    unmortgageProperty: function (pid, sid) { MP.send({ kind: 'unmortgage', spaceId: sid }); },
+    buildHouse:       function (sid) { MP.send({ kind: 'build', spaceId: sid }); },
+    sellHouse:        function (sid) { MP.send({ kind: 'sell', spaceId: sid }); },
+    mortgageProperty: function (sid) { MP.send({ kind: 'mortgage', spaceId: sid }); },
+    unmortgageProperty: function (sid) { MP.send({ kind: 'unmortgage', spaceId: sid }); },
     endLandAction: function () {},
-    resolveDebt: function () {},
-    forceSettleDebt: function () {},
+
+    /* Settling a debt is the answer to a question the host asked, not a move
+       of its own, so it goes back down the same channel. */
+    resolveDebt: function () { MP.answerRaiseFunds('pay'); },
+    forceSettleDebt: function () { MP.answerRaiseFunds('bankrupt'); },
+
+    requestTrade: function (deal) { MP.send({ kind: 'trade', deal: deal }); },
+    concede: function (playerId) { MP.send({ kind: 'concede', playerId: playerId }); },
     executeTrade: function () {}
   };
+
+  /* The rules for what makes a legal deal, and when a deal may be struck, are
+     the game's. A guest checks against its mirror before sending so a bad
+     offer is refused where it is being built, not one round trip later. */
+  if (typeof Game === 'function') {
+    mirror.validateDeal = Game.prototype.validateDeal.bind(mirror);
+    mirror.canTrade = Game.prototype.canTrade.bind(mirror);
+    mirror.standings = Game.prototype.standings.bind(mirror);
+  }
+
   mirror.ui = new UI(mirror);
   return mirror;
 };
 
 MP.applySnapshot = function (snap) {
   if (!snap) return;
+  var sticky = MP.mirror && MP.mirror.ui ? MP.mirror.ui.sticky : null;
+
   MP.mirror = MP.buildMirror(snap);
   mpEl('setup-screen').style.display = 'none';
   mpEl('lobby-screen').style.display = 'none';
   mpEl('game-screen').style.display = '';
-  try {
-    renderBoard(mpEl('board-grid'));
-  } catch (e) { /* board only needs drawing once */ }
+
+  if (!MP._boardDrawn) {
+    try {
+      if (typeof applyBoardTheme === 'function') applyBoardTheme(snap.theme);
+      renderBoard(mpEl('board-grid'));
+      MP._boardDrawn = true;
+    } catch (e) { /* board only needs drawing once */ }
+  }
+
   try {
     MP.mirror.ui.updateAll();
+    MP.mirror.ui.replaceGameLog(snap.log);
+    /* A modal that is a conversation rather than a question — raising funds
+       against a debt — has to follow the board it is arguing with. */
+    if (sticky) {
+      MP.mirror.ui.sticky = sticky;
+      MP.mirror.ui.redrawSticky();
+    }
+    if (snap.over && !MP._shownGameOver) {
+      MP._shownGameOver = true;
+      var standings = MP.mirror.standings ? MP.mirror.standings() : [];
+      if (standings.length) {
+        MP.mirror.ui.showGameOverModal(standings[0].player, { standings: standings });
+      }
+    }
   } catch (e) {
     console.error('mirror render failed', e);
   }
@@ -216,32 +257,58 @@ MP.send = function (intent) {
 };
 
 /* Host side: is this intent allowed, and what does it do? Returning false
-   tells the sync layer to reject it, which the guest sees as a refusal. */
+   tells the sync layer to reject it, which the guest sees as a refusal.
+
+   Turn ownership is not quite the whole story. Managing property is also
+   allowed to whoever currently owes money, because a card can bill a player
+   on somebody else's turn and they have to be able to raise it. Trading is
+   allowed to anyone: deals are struck across the table. */
 MP.applyIntent = function (seatId, intent, game) {
   if (!game || !intent) return false;
-  if (seatId !== game.currentPlayer) return false;
+  if (game.over) return false;
+
+  var theirTurn = seatId === game.currentPlayer;
+  var owesMoney = !!(game._pendingDebt && game._pendingDebt.playerId === seatId);
 
   switch (intent.kind) {
     case 'roll':
-      if (game.phase !== 'roll') return false;
+      if (!theirTurn || game.phase !== 'roll') return false;
       game.handleRoll();
       return true;
     case 'endTurn':
+      if (!theirTurn) return false;
       if (game.phase !== 'action' && game.phase !== 'rolled') return false;
       game.endTurn();
       return true;
     case 'build':
-      game.buildHouse(seatId, intent.spaceId);
+      if (!theirTurn) return false;
+      game.buildHouse(intent.spaceId, seatId);
       return true;
     case 'sell':
-      game.sellHouse(seatId, intent.spaceId);
+      if (!theirTurn && !owesMoney) return false;
+      game.sellHouse(intent.spaceId, seatId);
       return true;
     case 'mortgage':
-      game.mortgageProperty(seatId, intent.spaceId);
+      if (!theirTurn && !owesMoney) return false;
+      game.mortgageProperty(intent.spaceId, seatId);
       return true;
     case 'unmortgage':
-      game.unmortgageProperty(seatId, intent.spaceId);
+      if (!theirTurn && !owesMoney) return false;
+      game.unmortgageProperty(intent.spaceId, seatId);
       return true;
+
+    /* A deal may be proposed at any time, by anyone still in the game — but
+       only ever in your own name. */
+    case 'trade': {
+      var deal = intent.deal;
+      if (!deal || deal.fromId !== seatId) return false;
+      return game.requestTrade(deal) !== false;
+    }
+    case 'concede':
+      if (intent.playerId !== undefined && intent.playerId !== seatId) return false;
+      game.concede(seatId);
+      return true;
+
     default:
       return false;
   }
@@ -290,17 +357,97 @@ MP.handleAsk = function (msg) {
       function () { reply('roll'); });
   } else if (msg.kind === 'card') {
     ui.showCardModal(msg.payload.card, msg.payload.type, function () { reply('ok'); });
+
+  } else if (msg.kind === 'bid') {
+    // One round of an auction: everything it needs is in the question.
+    ui.showBidModal(msg.payload, reply);
+
+  } else if (msg.kind === 'trade') {
+    ui.showTradeOfferModal(msg.payload.deal,
+      function () { reply('accept'); },
+      function () { reply('decline'); });
+
+  } else if (msg.kind === 'raiseFunds') {
+    /* Raising funds is a conversation: the sells and mortgages go back as
+       ordinary intents, and only the last word — paid, or bankrupt — is the
+       answer to this question. */
+    MP._answerRaise = reply;
+    ui.showRaiseFundsModal(msg.payload.playerId, msg.payload.amount,
+                           msg.payload.creditorId, msg.payload.reason);
+
+  } else if (msg.kind === 'anywhere') {
+    ui.showChooseSpaceModal(msg.payload.playerId, reply);
+
   } else {
     reply(null);
   }
 };
 
-/* Marks a decision that still happens on the host. Kept as a call so the
-   remaining work is greppable rather than invisible. */
-MP.hostOnlyPrompt = function (what) {
+/* The one word that closes a raise-funds conversation. */
+MP.answerRaiseFunds = function (answer) {
+  var reply = MP._answerRaise;
+  MP._answerRaise = null;
+  if (reply) reply(answer);
+};
+
+/* ------------------------------------------------------- table talk ----- */
+
+/* A line for everyone: auction bids, trades, whatever the host wants the rest
+   of the table to see. Guests render it as a toast and a log entry. */
+MP.note = function (text) {
+  if (MP.mode === 'host' && MP.host && MP.host.note) MP.host.note('line', { text: text });
+};
+
+MP.onNote = function (key, params) {
+  var ui = MP.mirror && MP.mirror.ui;
+  if (!ui || !params || !params.text) return;
+  ui.addGameLog(params.text);
+};
+
+/* Chat. The data channel is already open and already carrying the game, so a
+   chat box costs one message kind. */
+MP.sendChat = function (text) {
+  text = String(text || '').slice(0, 200).trim();
+  if (!text) return;
   if (MP.mode === 'host') {
-    console.info('[online] ' + what + ' is resolved on the host in this version');
+    MP.receiveChat('Host', text);
+    if (MP.host && MP.host.chat) MP.host.chat('Host', text);
+  } else if (MP.mode === 'guest' && MP.guest && MP.guest.chat) {
+    MP.guest.chat(text);
   }
+};
+
+MP.receiveChat = function (who, text) {
+  var ui = (MP.mirror && MP.mirror.ui) || (window._game && window._game.ui);
+  var box = mpEl('chat-log');
+  if (box) {
+    var line = document.createElement('div');
+    line.className = 'chat-line';
+    var name = document.createElement('span');
+    name.className = 'chat-who';
+    name.textContent = who + ': ';
+    line.appendChild(name);
+    line.appendChild(document.createTextNode(text));
+    box.appendChild(line);
+    box.scrollTop = box.scrollHeight;
+    while (box.children.length > 80) box.removeChild(box.firstChild);
+  }
+  if (typeof SFX !== 'undefined') SFX.play('chat');
+  if (ui && !box) ui.showToast(who + ': ' + text, 'info');
+};
+
+/* A name for this browser that survives a reload, so a player who drops can
+   walk back into the seat they were in rather than any seat going. */
+MP.clientId = function () {
+  if (MP._clientId) return MP._clientId;
+  var id = null;
+  try { id = localStorage.getItem('monopolyish.clientId'); } catch (e) {}
+  if (!id) {
+    id = 'c' + Math.random().toString(36).slice(2, 10) + Date.now().toString(36).slice(-4);
+    try { localStorage.setItem('monopolyish.clientId', id); } catch (e) {}
+  }
+  MP._clientId = id;
+  return id;
 };
 
 /* --------------------------------------------------------- broadcasting -- */

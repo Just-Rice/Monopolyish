@@ -195,7 +195,12 @@
           onSeats: renderSeats,
           onReply: MP.onReply,
           onPaused: onDropped,
-          onResumed: onReturned
+          onResumed: onReturned,
+          onChat: MP.receiveChat,
+          onReclaimed: function (seatId, who) {
+            onReturned(seatId);
+            status((who || 'A player') + ' is back in their seat.');
+          }
         });
         el('code-box').style.display = '';
         el('room-code').textContent = code;
@@ -225,8 +230,11 @@
 
   /* ------------------------------------------------------------- guest -- */
 
+  var lastCode = null;
+
   function startJoining(code) {
     MP.mode = 'guest';
+    lastCode = code;
     showScreen('lobby-screen');
     status('Connecting to ' + code + '…');
     el('code-box').style.display = 'none';
@@ -249,8 +257,17 @@
         MP.transport = transport;
         MP.guest = ChowkaNet.createGuest({
           transport: transport,
-          name: 'Guest',
+          name: guestName(),
           selfPeerId: id,
+          clientId: MP.clientId(),
+          onNote: MP.onNote,
+          onChat: MP.receiveChat,
+          onSeatRestored: function (seatId) {
+            MP.mySeat = seatId;
+            MP.myReady = true;
+            status('Welcome back — your seat was still here.');
+            el('mp-pause').style.display = 'none';
+          },
           onSeats: function (seats) {
             var mine = seats.filter(function (s) { return s.peerId === id; })[0];
             MP.mySeat = mine ? mine.id : null;
@@ -260,7 +277,11 @@
                  : mine.ready ? 'Ready. Waiting for the host to start.'
                  : 'Seat taken. Press “I’m ready” when you are.');
           },
-          onSnapshot: MP.applySnapshot,
+          onSnapshot: function (snap) {
+            var chat = el('chat-section');
+            if (chat) chat.hidden = false;
+            MP.applySnapshot(snap);
+          },
           onAsk: MP.handleAsk,
           onReject: function (reason) { status(reason, true); },
           onPaused: onDropped,
@@ -278,6 +299,32 @@
 
       peer.on('error', function (err) { status(MP.peerError(err), true); });
     }).catch(function (e) { status(e.message, true); });
+  }
+
+  /* The name a guest goes by, remembered between visits so a reconnecting
+     player is recognisable in the seat list and in chat. */
+  function guestName() {
+    var typed = el('join-name') && el('join-name').value.trim();
+    if (typed) {
+      try { localStorage.setItem('monopolyish.name', typed); } catch (e) {}
+      return typed.slice(0, 20);
+    }
+    try {
+      var saved = localStorage.getItem('monopolyish.name');
+      if (saved) return saved.slice(0, 20);
+    } catch (e) {}
+    return 'Guest';
+  }
+
+  /* Walk back into the room we were in. The seat is held for this browser by
+     its client id, so this is a reconnection rather than a fresh join. */
+  function retryJoin() {
+    if (!lastCode) return;
+    el('mp-pause').style.display = 'none';
+    status('Reconnecting to ' + lastCode + '…');
+    if (MP.peer) { try { MP.peer.destroy(); } catch (e) {} }
+    MP.guest = null;
+    startJoining(lastCode);
   }
 
   /* ---------------------------------------------------- drops and joins -- */
@@ -302,6 +349,8 @@
     // whoever left, or wait for them to come back.
     var cont = el('mp-pause-continue');
     if (cont) cont.style.display = (MP.mode === 'host' && !hostGone) ? '' : 'none';
+    var retry = el('mp-pause-retry');
+    if (retry) retry.style.display = (MP.mode === 'guest' && lastCode) ? '' : 'none';
     el('mp-pause').style.display = '';
   }
 
@@ -380,6 +429,8 @@
 
         showScreen('game-screen');
         startLocalGame();                 // build the game directly, no re-entry
+        var chat = el('chat-section');
+        if (chat) chat.hidden = false;
         MP.host.pushSeats();
         MP.publish(liveGame());
       });
@@ -407,5 +458,20 @@
       if (MP.peer) { try { MP.peer.destroy(); } catch (e) {} }
       location.reload();
     });
+
+    var retry = el('mp-pause-retry');
+    if (retry) retry.addEventListener('click', retryJoin);
+
+    /* Chat: the box only means anything once there is somebody else there. */
+    var chatForm = el('chat-form');
+    if (chatForm) {
+      chatForm.addEventListener('submit', function (e) {
+        e.preventDefault();
+        var input = el('chat-input');
+        if (!input || !input.value.trim()) return;
+        MP.sendChat(input.value);
+        input.value = '';
+      });
+    }
   });
 })();

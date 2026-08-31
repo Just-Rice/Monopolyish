@@ -124,15 +124,24 @@ class Game {
     const boardContainer = document.getElementById('board-grid');
     renderBoard(boardContainer);
 
-    // Board space click handlers
-    document.getElementById('board-grid').addEventListener('click', (e) => {
-      const spaceEl = e.target.closest('[data-space]');
+    // Board space handlers — pointer and keyboard both open the deed.
+    const openSpace = (spaceEl) => {
       if (!spaceEl) return;
       const spaceId = parseInt(spaceEl.dataset.space);
       const type = spaceEl.dataset.type;
       if (['property','railroad','utility'].includes(type)) {
         this.ui.showPropertyModal(spaceId);
       }
+    };
+    document.getElementById('board-grid').addEventListener('click', (e) => {
+      openSpace(e.target.closest('[data-space]'));
+    });
+    document.getElementById('board-grid').addEventListener('keydown', (e) => {
+      if (e.key !== 'Enter' && e.key !== ' ') return;
+      const spaceEl = e.target.closest ? e.target.closest('[data-space]') : null;
+      if (!spaceEl) return;
+      e.preventDefault();
+      openSpace(spaceEl);
     });
 
     // Button handlers
@@ -146,10 +155,22 @@ class Game {
     });
     document.getElementById('btn-build').addEventListener('click', () => this.showBuildMenu());
     document.getElementById('btn-trade').addEventListener('click', () => this.ui.showTradeModal());
+    document.getElementById('btn-concede')?.addEventListener('click', () => this.ui.showConcedeModal());
+
+    if (this.options.speedDie) {
+      const speedEl = document.getElementById('dice-speed');
+      if (speedEl) speedEl.hidden = false;
+    }
+    this.ui.renderRulesInForce();
 
     this.ui.updateAll();
     this.ui.showToast(`${this.players[this.currentPlayer].name}'s turn! Roll the dice.`, 'dice');
-    this.ui.addGameLog(`🎮 Game started with ${this.players.length} players!`);
+    if (!this.log.length) {
+      this.ui.addGameLog(`🎮 Game started with ${this.players.length} players!`);
+    } else {
+      this.log.forEach(line => this.ui.renderLogEntry(line));
+      this.ui.addGameLog('💾 Resumed from a saved game');
+    }
 
     // If the first player is AI, start their turn
     if (this.isCurrentPlayerAI()) {
@@ -327,12 +348,13 @@ class Game {
     const ai = this.getAI(this._pendingDebt.playerId);
     if (!ai) return;
 
+    const debtorId = this._pendingDebt.playerId;
     const actions = ai.decideRaiseFunds(this._pendingDebt.amount, this);
     for (const act of actions) {
       if (act.action === 'sell') {
-        this.sellHouse(act.spaceId);
+        this.sellHouse(act.spaceId, debtorId);
       } else if (act.action === 'mortgage') {
-        this.mortgageProperty(act.spaceId);
+        this.mortgageProperty(act.spaceId, debtorId);
       }
       await this._wait(300);
     }
@@ -1042,14 +1064,17 @@ class Game {
     return true;
   }
 
-  buildHouse(spaceId) {
-    if (!canBuildHouse(this.currentPlayer, spaceId, this.state)) {
+  /* Managing property is not always the player to move: during a debt it is
+     whoever owes, and a debt can be run up on somebody else's turn by a card.
+     So each of these takes the owner, defaulting to the player to move. */
+  buildHouse(spaceId, playerId = this.currentPlayer) {
+    if (!canBuildHouse(playerId, spaceId, this.state)) {
       this.ui.showToast('Cannot build here!', 'error');
       SFX.play('error');
       return;
     }
     const space = BOARD_SPACES[spaceId];
-    const player = this.players[this.currentPlayer];
+    const player = this.players[playerId];
     const prop = this.state.properties[spaceId];
     const cost = space.housePrice;
 
@@ -1075,20 +1100,20 @@ class Game {
       `${player.name} built a ${isHotel ? '🏨 hotel' : '🏠 house'} on ${space.name} for $${cost}! (🏠${this.state.housesAvailable} 🏨${this.state.hotelsAvailable} left)`,
       'success'
     );
-    this.stats.perPlayer[this.currentPlayer].housesBuilt++;
+    this.stats.perPlayer[playerId].housesBuilt++;
     SFX.play('build');
     this.ui.addGameLog(`🏠 ${player.name} built on ${space.name}`);
     this.ui.updateAll();
     this.autosave();
   }
 
-  sellHouse(spaceId) {
-    if (!canSellHouse(this.currentPlayer, spaceId, this.state)) {
+  sellHouse(spaceId, playerId = this.currentPlayer) {
+    if (!canSellHouse(playerId, spaceId, this.state)) {
       this.ui.showToast('Cannot sell here!', 'error');
       return;
     }
     const space = BOARD_SPACES[spaceId];
-    const player = this.players[this.currentPlayer];
+    const player = this.players[playerId];
     const prop = this.state.properties[spaceId];
     const value = Math.floor((space.housePrice || 0) / 2);
 
@@ -1118,12 +1143,12 @@ class Game {
     this.autosave();
   }
 
-  mortgageProperty(spaceId) {
+  mortgageProperty(spaceId, playerId = this.currentPlayer) {
     const space = BOARD_SPACES[spaceId];
     const prop = this.state.properties[spaceId];
-    const player = this.players[this.currentPlayer];
+    const player = this.players[playerId];
 
-    if (prop.mortgaged || (prop.houses || 0) > 0) {
+    if (prop.owner !== playerId || prop.mortgaged || (prop.houses || 0) > 0) {
       this.ui.showToast('Cannot mortgage this property!', 'error');
       return;
     }
@@ -1136,13 +1161,13 @@ class Game {
     this.autosave();
   }
 
-  unmortgageProperty(spaceId) {
+  unmortgageProperty(spaceId, playerId = this.currentPlayer) {
     const space = BOARD_SPACES[spaceId];
     const prop = this.state.properties[spaceId];
-    const player = this.players[this.currentPlayer];
+    const player = this.players[playerId];
     const cost = Math.floor(space.mortgage * 1.1);
 
-    if (!prop.mortgaged || player.money < cost) {
+    if (prop.owner !== playerId || !prop.mortgaged || player.money < cost) {
       this.ui.showToast('Cannot unmortgage!', 'error');
       return;
     }

@@ -62,7 +62,14 @@ function fakeGame() {
     },
     handleRoll: function () { this.rolled++; this.phase = 'action'; },
     endTurn:    function () { this.ended++; this.currentPlayer = 1; this.phase = 'roll'; },
-    buildHouse: function (p, s) { this.built.push([p, s]); }
+    /* Same signature as the real Game: the space first, the owner second. The
+       fixture used to have them the other way round, which is how an intent
+       that built on the wrong square passed this suite. */
+    buildHouse: function (spaceId, playerId) { this.built.push([playerId, spaceId]); },
+    sellHouse: function (spaceId, playerId) { this.built.push(['sell', playerId, spaceId]); },
+    requestTrade: function (deal) { this.traded = deal; return true; },
+    concede: function (playerId) { this.conceded = playerId; },
+    over: false
   };
 }
 
@@ -149,9 +156,9 @@ check('ending your own turn is applied',
       MP.applyIntent(0, { kind: 'endTurn' }, game) === true && game.ended === 1);
 
 game = fakeGame();
-check('building routes through with its space id',
+check('building routes through with its space id and its owner',
       MP.applyIntent(0, { kind: 'build', spaceId: 5 }, game) === true &&
-      game.built[0][1] === 5, JSON.stringify(game.built));
+      game.built[0][0] === 0 && game.built[0][1] === 5, JSON.stringify(game.built));
 check('an unknown intent is refused',
       MP.applyIntent(0, { kind: 'nonsense' }, game) === false);
 check('an empty intent is refused', MP.applyIntent(0, null, game) === false);
