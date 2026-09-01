@@ -127,6 +127,11 @@ class Game {
     if (typeof Save === 'undefined') return;
     if (this.over) return;
     if (typeof MP !== 'undefined' && MP.mode === 'guest') return;  // guests own nothing
+    /* Not in the middle of a debt. A save carries no pending debt, so one
+       written while the raise-funds modal was open came back as a game where
+       the money was simply never owed — and selling a house to raise it was
+       one of the things that triggered a save. */
+    if (this._pendingDebt) return;
     Save.write(this);
   }
 
@@ -541,6 +546,12 @@ class Game {
     if (result.doubles) {
       player.inJail = false;
       player.jailTurns = 0;
+      /* Doubles get you out and move you, and then your turn is over: the
+         throw that opens the cell does not also earn another one. The phase
+         is decided from lastRoll when the token lands, so this is the flag
+         that has to say so. */
+      this.lastRoll = { ...result, doubles: false };
+      this.doublesCount = 0;
       this.ui.showToast(`${player.name} rolled doubles and is free from Jail!`, 'success');
       this.ui.addGameLog(`🔓 ${player.name} escaped jail with doubles!`);
       await this.movePlayer(this.currentPlayer, result.total);
@@ -550,6 +561,10 @@ class Game {
         // Must pay on 3rd turn
         this.ui.showToast(`${player.name} must pay $50 fine to leave jail!`, 'warning');
         this.payMoney(this.currentPlayer, 50, 'Jail fine');
+        /* Same as paying the fine by choice: if the money is not there, the
+           debt comes first. Moving on top of it landed them on a square that
+           could charge rent while the raise-funds modal was still open. */
+        if (this._pendingDebt || player.bankrupt) return;
         player.inJail = false;
         player.jailTurns = 0;
         await this.movePlayer(this.currentPlayer, result.total);
@@ -567,6 +582,14 @@ class Game {
     const player = this.players[playerId];
     const startPos = player.position;
     let passedGo = false;
+
+    /* A move takes a second or so to walk out, and the square it ends on is
+       what decides the phase. Saying so here is what stops a card that moves
+       you — "Advance to Illinois Ave" — from handing the turn back the instant
+       the card is acknowledged: the phase went to 'action' while the token was
+       still three squares in, so the turn could be ended, and the landing then
+       fired during somebody else's turn. */
+    this._pendingLandAction = true;
 
     // Animate step by step
     for (let i = 1; i <= steps; i++) {
@@ -597,6 +620,7 @@ class Game {
   async movePlayerTo(playerId, targetPos, collectGo = true, opts = {}) {
     const player = this.players[playerId];
     const startPos = player.position;
+    this._pendingLandAction = true;      // see movePlayer, above
 
     // Calculate forward steps (always move forward around the board)
     let forwardSteps = (targetPos - startPos + 40) % 40;
@@ -651,6 +675,12 @@ class Game {
   landOnSpace(playerId, spaceId, opts = {}) {
     const space = BOARD_SPACES[spaceId];
     const player = this.players[playerId];
+    /* The move has arrived, so the flag that says one is in flight comes down
+       here: from this point the square itself decides the phase. Leaving it
+       standing meant the next card drawn — one that only pays money, with no
+       move of its own — took it as "somebody else will set the phase", and the
+       turn could never be ended. */
+    this._pendingLandAction = false;
     this.ui.addGameLog(`📍 ${player.name} landed on ${space.name}`);
 
     switch (space.type) {
@@ -888,7 +918,12 @@ class Game {
     const player = this.players[playerId];
     // Whoever is in jail answers, wherever they are sitting.
     const payFine = () => {
-      this.payMoney(this.currentPlayer, 50, 'Jail fine');
+      this.payMoney(playerId, 50, 'Jail fine');
+      /* The fine may be more than they have in cash, which opens the debt
+         they have to raise before anything else happens. Walking out of the
+         cell and setting 'roll' over the top of that let them roll — and move,
+         and land — while still owing the money. */
+      if (this._pendingDebt || player.bankrupt) return;
       player.inJail = false;
       player.jailTurns = 0;
       this.phase = 'roll';
@@ -1088,6 +1123,16 @@ class Game {
   purchaseProperty(playerId, spaceId, price) {
     const player = this.players[playerId];
     const space = BOARD_SPACES[spaceId];
+    const prop = this.state.properties[spaceId];
+
+    /* Only the bank sells. Without this, a stale answer — an auction settled
+       twice, a reply that arrived late from another screen — moved the deed to
+       a new owner while the old one still had it on their own list, and both
+       of them collected rent on it. */
+    if (!prop || prop.owner !== null) {
+      this.ui.showToast(`${space.name} is not for sale.`, 'warning');
+      return false;
+    }
 
     if (player.money < price) {
       this.ui.showToast(`${player.name} cannot afford ${space.name}.`, 'error');
@@ -1097,7 +1142,7 @@ class Game {
 
     player.money -= price;
     player.properties.push(spaceId);
-    this.state.properties[spaceId].owner = playerId;
+    prop.owner = playerId;
     this.stats.perPlayer[playerId].propertiesBought++;
     SFX.play('buy');
     this.ui.showToast(`${player.name} bought ${space.name} for $${price}!`, 'success');
@@ -1418,7 +1463,10 @@ class Game {
       if (this.state.properties[id].mortgaged) {
         const space = BOARD_SPACES[id];
         const interest = Math.floor(space.mortgage * 0.1);
-        to.money -= interest;
+        // Through the bank's own machinery: taking it straight out of the
+        // balance pushed a player who could not afford it below zero, with no
+        // debt raised and nothing said.
+        this.payMoney(toId, interest, `Interest on ${space.name}`);
         this.ui.addGameLog(`💸 ${to.name} paid $${interest} interest on mortgaged ${space.name}`);
       }
     });
@@ -1430,7 +1478,7 @@ class Game {
       if (this.state.properties[id].mortgaged) {
         const space = BOARD_SPACES[id];
         const interest = Math.floor(space.mortgage * 0.1);
-        from.money -= interest;
+        this.payMoney(fromId, interest, `Interest on ${space.name}`);
         this.ui.addGameLog(`💸 ${from.name} paid $${interest} interest on mortgaged ${space.name}`);
       }
     });

@@ -649,6 +649,146 @@ if (typeof G.Game === 'function') {
         debtor.canEndTurn() === false && debtor.canRoll() === false);
 }
 
+/* ------------------------------------------------------ money at rest -- */
+
+/* Nothing may mint money. Each of these cards moves money between players, and
+   each of them used to get it wrong when somebody could not pay. */
+if (typeof G.Game === 'function') {
+  var inPlay = function (g) {
+    return g.players.reduce(function (sum, p) { return sum + p.money; }, 0) +
+           g.state.freeParkingPot;
+  };
+  var cardNamed = function (fragment) {
+    return (G.CHANCE_CARDS || []).concat(G.COMMUNITY_CHEST_CARDS || [])
+      .filter(function (c) { return c.text.indexOf(fragment) >= 0; })[0];
+  };
+
+  /* Paying everyone when you cannot afford it. The old card paid the whole sum
+     to the bank and then handed every player $50 regardless, which conjured
+     the difference out of nothing. */
+  var chairman = cardNamed('Chairman of the Board');
+  check('the chairman card is still in the deck', !!chairman);
+  if (chairman) {
+    var ch = new G.Game(['A', 'B', 'C'], null);
+    ch.currentPlayer = 0;
+    ch.players[0].money = 20;              // cannot cover two payments of $50
+    var chBefore = inPlay(ch);
+    chairman.action(ch);
+    check('paying every player conserves the money in play',
+          inPlay(ch) === chBefore, chBefore + ' -> ' + inPlay(ch));
+    check('and the payer is bankrupted rather than paying what it does not have',
+          ch.players[0].bankrupt === true && ch.players[0].money === 0);
+  }
+
+  /* Collecting from everyone when one of them goes bankrupt part-way round.
+     Bankruptcy passes the turn on, and the card read whose turn it was on each
+     pass — so the rest of the table paid whoever that turned out to be. */
+  var opera = cardNamed('Grand Opera');
+  if (opera) {
+    var op = new G.Game(['A', 'B', 'C'], null);
+    op.currentPlayer = 0;
+    op.players[1].money = 5;               // goes under on the first payment
+    op.players[2].money = 900;
+    var opBefore = inPlay(op);
+    var collectorMoney = op.players[0].money;
+    opera.action(op);
+    check('collecting from everyone conserves the money in play',
+          inPlay(op) === opBefore, opBefore + ' -> ' + inPlay(op));
+    check('and every payment goes to the player who drew the card',
+          op.players[0].money > collectorMoney && op.players[2].money === 850,
+          op.players.map(function (p) { return p.money; }).join(','));
+  }
+}
+
+/* ------------------------------------------------ a move in flight ----- */
+
+if (typeof G.Game === 'function') {
+  /* A card that moves you takes a second to walk it out, and the square it
+     lands on decides the phase. The turn used to be handed back the instant
+     the card was acknowledged: you could end it mid-move, and the landing then
+     resolved during somebody else's turn. */
+  var mover = (G.CHANCE_CARDS || []).filter(function (c) {
+    return /Advance to Illinois/.test(c.text);
+  })[0];
+  if (mover) {
+    var mv = new G.Game(['A', 'B'], null);
+    mv.currentPlayer = 0;
+    mv.phase = 'rolling';
+    mv.lastRoll = { d1: 1, d2: 2, total: 3, doubles: false };
+    mv.ui.showCardModal = function (card, type, onClose) { onClose(); };
+    mv.decks.chanceIndex = mv.decks.chance.indexOf(mover);
+    mv.handleCardLanding(0, 'chance');
+    check('a card that moves you holds the turn until the token lands',
+          mv.canEndTurn() === false && mv.phase !== 'action',
+          mv.phase + ' @ ' + mv.players[0].position);
+  }
+
+  /* ...and the flag has to come down again, or the next card — one that only
+     pays money — leaves the turn with nobody to end it. */
+  var payer = (G.CHANCE_CARDS || []).filter(function (c) {
+    return /dividend of \$50/.test(c.text);
+  })[0];
+  if (payer) {
+    var mv2 = new G.Game(['A', 'B'], null);
+    mv2.currentPlayer = 0;
+    mv2.lastRoll = { d1: 3, d2: 4, total: 7, doubles: false };
+    mv2.phase = 'rolling';
+    mv2.ui.showCardModal = function (card, type, onClose) { onClose(); };
+    mv2.landOnSpace(0, 7);                 // Chance, drawing the money card
+    mv2.decks.chanceIndex = mv2.decks.chance.indexOf(payer);
+    mv2.ui.showCardModal = function (card, type, onClose) { onClose(); };
+    mv2.handleCardLanding(0, 'chance');
+    check('a card that only pays money gives the turn straight back',
+          mv2.canEndTurn() === true, mv2.phase);
+  }
+}
+
+/* --------------------------------------------------- the bank sells --- */
+
+if (typeof G.Game === 'function') {
+  var owned = new G.Game(['A', 'B'], null);
+  owned.state.properties[1].owner = 1;
+  owned.players[1].properties.push(1);
+  var buyerCash = owned.players[0].money;
+  check('a deed that is already owned is not for sale',
+        owned.purchaseProperty(0, 1, 60) === false &&
+        owned.state.properties[1].owner === 1 &&
+        owned.players[0].money === buyerCash);
+
+  /* Taking a mortgaged deed costs 10% interest, and that has to go through the
+     same machinery as any other bill — it used to come straight out of the
+     balance and could leave a player below zero with nothing said. */
+  var interest = new G.Game(['A', 'B'], null);
+  interest.state.properties[1].owner = 0;
+  interest.players[0].properties.push(1);
+  interest.state.properties[1].mortgaged = true;
+  interest.players[1].money = 0;
+  interest.executeTrade(0, 1, [1], [], 0, 0, 0, 0);
+  check('interest on a mortgaged deed never leaves a player below zero',
+        interest.players[1].money >= 0, String(interest.players[1].money));
+}
+
+/* --------------------------------------------------------- saving ----- */
+
+if (typeof G.Save !== 'undefined' && typeof G.Game === 'function') {
+  G.Save.clear();
+  var owing = new G.Game(['A', 'B'], null);
+  [1, 3, 6, 8, 9].forEach(function (id) {
+    owing.state.properties[id].owner = 0;
+    owing.players[0].properties.push(id);
+  });
+  owing.state.properties[39].owner = 1;
+  owing.players[1].properties.push(39);
+  owing.players[0].money = 5;
+  owing.ui.showRaiseFundsModal = function () {};
+  owing.handlePropertyLanding(0, 39);          // rent it cannot cover
+  check('an unpayable rent raises a debt', !!owing._pendingDebt);
+  owing.mortgageProperty(1, 0);                // raising funds triggers a save
+  check('nothing is saved over an open debt, which a save cannot carry',
+        G.Save.read() === null, JSON.stringify(G.Save.read() && G.Save.read().phase));
+  G.Save.clear();
+}
+
 /* ------------------------------------------------------------- jail ---- */
 
 /* Starting a turn in jail reached for a variable that was never declared, so
@@ -687,6 +827,55 @@ if (typeof G.Game === 'function') {
   check('and so does the card, which is spent doing it',
         jail3.players[0].inJail === false && jail3.players[0].jailCards.length === 0 &&
         jail3.players[0].money === 1500);
+
+  /* A fine you cannot cover in cash is a debt, and a debt comes before
+     anything else. The doors used to open anyway, with the phase set back to
+     'roll' over the top of it — so the player rolled, moved and landed while
+     still owing the money. */
+  var broke = new G.Game(['A', 'B'], null);
+  broke.currentPlayer = 0;
+  broke.players[0].inJail = true;
+  broke.players[0].money = 5;
+  [1, 3, 6, 8, 9].forEach(function (id) {          // assets, so it is a debt
+    broke.state.properties[id].owner = 0;
+    broke.players[0].properties.push(id);
+  });
+  broke.ui.showJailModal = function (player, onPay) { onPay(); };
+  broke.ui.showRaiseFundsModal = function () {};
+  broke.handleJailOptions();
+  check('a fine you cannot pay leaves you in the cell, owing it',
+        !!broke._pendingDebt && broke.players[0].inJail === true &&
+        broke.phase === 'debt' && broke.canRoll() === false,
+        broke.phase + '/' + broke.players[0].inJail);
+
+  /* Same on the third turn, where the fine is compulsory. */
+  var third = new G.Game(['A', 'B'], null);
+  third.currentPlayer = 0;
+  third.players[0].inJail = true;
+  third.players[0].jailTurns = 2;
+  third.players[0].money = 5;
+  [1, 3, 6, 8, 9].forEach(function (id) {
+    third.state.properties[id].owner = 0;
+    third.players[0].properties.push(id);
+  });
+  third.players[0].position = 10;                  // in the cell, where else
+  third.ui.showRaiseFundsModal = function () {};
+  third.handleJailRoll({ d1: 1, d2: 2, total: 3, doubles: false });
+  check('the compulsory fine is settled before the player moves',
+        !!third._pendingDebt && third.players[0].position === 10 &&
+        third.players[0].inJail === true,
+        third.players[0].position + '/' + third.players[0].inJail);
+
+  /* Doubles open the door and move you — they do not also earn another roll. */
+  var freed = new G.Game(['A', 'B'], null);
+  freed.currentPlayer = 0;
+  freed.players[0].inJail = true;
+  freed.players[0].position = 10;
+  freed.phase = 'rolling';
+  freed.handleJailRoll({ d1: 5, d2: 5, total: 10, doubles: true });
+  check('doubles out of jail do not earn another roll',
+        freed.lastRoll.doubles === false && freed.doublesCount === 0,
+        JSON.stringify(freed.lastRoll));
 }
 
 /* -------------------------------------------------------- speed die ---- */
@@ -708,6 +897,14 @@ if (typeof G.rollDice === 'function') {
   check('a triple is always three of a kind', badTriple === null, JSON.stringify(badTriple));
   check('a numbered speed die adds to the total, and the others do not',
         badTotal === null, JSON.stringify(badTotal));
+  var tripleDoubles = 0;
+  for (var td = 0; td < 3000; td++) {
+    var tdRoll = G.rollDice(true);
+    if (tdRoll.triples && tdRoll.doubles) tripleDoubles++;
+  }
+  check('a triple is not a double: no second roll, and no third-double jail',
+        tripleDoubles === 0, String(tripleDoubles));
+
   check('all three speed faces come up',
         faces.number > 0 && faces.monopoly > 0 && faces.bus > 0, JSON.stringify(faces));
   check('triples happen, but rarely', triples > 0 && triples < 400, String(triples));

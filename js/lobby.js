@@ -200,6 +200,9 @@
           onReclaimed: function (seatId, who) {
             onReturned(seatId);
             status((who || 'A player') + ' is back in their seat.');
+            // Whatever they were being asked when they dropped, ask again.
+            var again = MP.resendPrompts(seatId);
+            if (again) diag('re-sent ' + again + ' question(s) to seat ' + (seatId + 1));
           }
         });
         el('code-box').style.display = '';
@@ -443,6 +446,12 @@
     });
     var cont = el('mp-pause-continue');
     if (cont) cont.addEventListener('click', function () {
+      /* Carrying on without them: anything that seat was still being asked has
+         to be answered for it, or the auction or trade it was holding up would
+         never finish. */
+      if (MP.pausedSeat !== null && MP.pausedSeat !== undefined) {
+        MP.abandonPrompts(MP.pausedSeat);
+      }
       el('mp-pause').style.display = 'none';
       MP.pausedSeat = null;
       showScreen('lobby-screen');

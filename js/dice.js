@@ -30,8 +30,10 @@ function rollDice(useSpeedDie) {
     result.speed = face;
     result.total += face.value;
     // Three of a kind — the white dice and a numbered speed die all matching —
-    // is the variant's "go wherever you like".
+    // is the variant's "go wherever you like". It is not a double: it does not
+    // earn another roll, and three of them do not send you to jail.
     result.triples = face.kind === 'number' && d1 === d2 && d2 === face.value;
+    if (result.triples) result.doubles = false;
   }
   return result;
 }

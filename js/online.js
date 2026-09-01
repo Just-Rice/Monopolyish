@@ -387,7 +387,11 @@ MP.prompt = function (playerId, kind, payload, opts) {
   if (!peerId) return opts.local();      // nobody there — host answers for them
 
   var id = ++MP._promptSeq;
-  MP._pending[id] = opts.onReply;
+  /* The question is kept, not just its callback: a player who drops mid-answer
+     comes back on a new connection, and the question they were asked has to be
+     asked again. Without it the auction, trade or debt waiting on them waited
+     for ever, and the game never moved again. */
+  MP._pending[id] = { seat: playerId, kind: kind, payload: payload, onReply: opts.onReply };
   /* The question is about a board that has just changed — a rent that emptied
      someone's pocket, a bid that moved. Send the state first so the modal is
      drawn from what is true now rather than whatever arrived last. */
@@ -396,10 +400,41 @@ MP.prompt = function (playerId, kind, payload, opts) {
 };
 
 MP.onReply = function (msg) {
-  var fn = MP._pending[msg.id];
-  if (!fn) return;
+  var pending = MP._pending[msg.id];
+  if (!pending) return;
   delete MP._pending[msg.id];
-  try { fn(msg.answer); } catch (e) { console.error('prompt reply failed', e); }
+  try { pending.onReply(msg.answer); } catch (e) { console.error('prompt reply failed', e); }
+};
+
+/* Someone has taken a seat again — put any question that seat still owes an
+   answer to back in front of them. */
+MP.resendPrompts = function (seatId) {
+  if (MP.mode !== 'host' || !MP.host) return 0;
+  var peerId = MP.host.peerForSeat ? MP.host.peerForSeat(seatId) : null;
+  if (!peerId) return 0;
+
+  var sent = 0;
+  Object.keys(MP._pending).forEach(function (id) {
+    var pending = MP._pending[id];
+    if (!pending || pending.seat !== seatId) return;
+    MP.host.askPeer(peerId, { id: Number(id), kind: pending.kind, payload: pending.payload });
+    sent++;
+  });
+  return sent;
+};
+
+/* Nobody is coming back for these: answer them the way a player who says
+   nothing would be treated, so whatever was waiting can finish. */
+MP.abandonPrompts = function (seatId) {
+  var defaults = { bid: 'pass', trade: 'decline', buy: 'auction', jail: 'roll',
+                   card: 'ok', anywhere: 0, raiseFunds: 'bankrupt' };
+  Object.keys(MP._pending).forEach(function (id) {
+    var pending = MP._pending[id];
+    if (!pending || pending.seat !== seatId) return;
+    delete MP._pending[id];
+    try { pending.onReply(defaults[pending.kind]); }
+    catch (e) { console.error('abandoned prompt failed', e); }
+  });
 };
 
 /* Guest side: a question arrived, show it and send the answer back. */
@@ -462,10 +497,18 @@ MP.note = function (text) {
   if (MP.mode === 'host' && MP.host && MP.host.note) MP.host.note('line', { text: text });
 };
 
+MP.escapeHtml = function (text) {
+  return String(text).replace(/[&<>"']/g, function (c) {
+    return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+  });
+};
+
 MP.onNote = function (key, params) {
   var ui = MP.mirror && MP.mirror.ui;
   if (!ui || !params || !params.text) return;
-  ui.addGameLog(params.text);
+  /* The log is rendered as HTML — the game's own lines use it for emphasis —
+     and this line came off the wire from another machine. */
+  ui.addGameLog(MP.escapeHtml(params.text));
 };
 
 /* Chat. The data channel is already open and already carrying the game, so a

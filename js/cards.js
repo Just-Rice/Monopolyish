@@ -118,10 +118,22 @@ const CHANCE_CARDS = [
     id: 'ch15',
     text: 'You have been elected Chairman of the Board. Pay each player $50.',
     action: (game) => {
-      const activePlayers = game.players.filter((p, i) => !p.bankrupt && i !== game.currentPlayer);
-      const totalPaid = activePlayers.length * 50;
-      game.payMoney(game.currentPlayer, totalPaid, 'Chairman of the Board');
-      activePlayers.forEach(p => { p.money += 50; });
+      /* Billed player by player, the same way the collect-from-everyone cards
+         are. Paying the whole sum to the bank and then handing everyone $50
+         anyway minted the difference out of nothing whenever the payer could
+         not cover it — and paid it twice when they could.
+
+         The payer is noted before any of it: going bankrupt part-way down the
+         table hands the turn to the next player, and reading it again from the
+         game mid-loop billed whoever that turned out to be. */
+      const payerId = game.currentPlayer;
+      const owed = 50;
+      game.players
+        .filter((p, i) => !p.bankrupt && i !== payerId)
+        .forEach(p => {
+          if (game.players[payerId].bankrupt) return;
+          game.payRent(payerId, p.id, owed);
+        });
       game.ui.updateAll();
     }
   },
@@ -175,8 +187,12 @@ const COMMUNITY_CHEST_CARDS = [
       // whatever they happened to have left them solvent on paper and quietly
       // short-changed whoever drew the card.
       const owed = 50;
-      const activePlayers = game.players.filter((p, i) => !p.bankrupt && i !== game.currentPlayer);
-      activePlayers.forEach(p => game.payRent(p.id, game.currentPlayer, owed));
+      // Noted before the round of payments: one player going bankrupt passes
+      // the turn on, and everybody after them would have paid the wrong player.
+      const collectorId = game.currentPlayer;
+      game.players
+        .filter((p, i) => !p.bankrupt && i !== collectorId)
+        .forEach(p => game.payRent(p.id, collectorId, owed));
       game.ui.updateAll();
     }
   },
@@ -199,8 +215,12 @@ const COMMUNITY_CHEST_CARDS = [
       // whatever they happened to have left them solvent on paper and quietly
       // short-changed whoever drew the card.
       const owed = 10;
-      const activePlayers = game.players.filter((p, i) => !p.bankrupt && i !== game.currentPlayer);
-      activePlayers.forEach(p => game.payRent(p.id, game.currentPlayer, owed));
+      // Noted before the round of payments: one player going bankrupt passes
+      // the turn on, and everybody after them would have paid the wrong player.
+      const collectorId = game.currentPlayer;
+      game.players
+        .filter((p, i) => !p.bankrupt && i !== collectorId)
+        .forEach(p => game.payRent(p.id, collectorId, owed));
       game.ui.updateAll();
     }
   },

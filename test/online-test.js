@@ -301,6 +301,77 @@ MP.answerRaiseFunds('pay');
 check('the debtor\'s answer is delivered once and once only',
       raiseAnswers.length === 1 && raiseAnswers[0] === 'pay', JSON.stringify(raiseAnswers));
 
+/* ------------------------------------------- questions left unanswered -- */
+
+/* A player who drops mid-answer comes back on a new connection. The question
+   they were being asked has to go with them, or whatever was waiting on it —
+   an auction, a trade, a debt — waits for ever and the game never moves. */
+MP.mode = 'host';
+MP.config = { seatKinds: ['local', 'remote'] };
+MP._pending = {};
+var reAsked = [];
+var seatPeer = 'PEER1';
+MP.host = {
+  peerForSeat: function (seat) { return seat === 1 ? seatPeer : null; },
+  askPeer: function (peer, q) { reAsked.push({ peer: peer, id: q.id, kind: q.kind, payload: q.payload }); },
+  pushSnapshot: function () {}
+};
+
+var auctionAnswer = 'still waiting';
+MP.prompt(1, 'bid', { spaceId: 9, bid: 40 }, {
+  local: function () {},
+  onReply: function (a) { auctionAnswer = a; }
+});
+var firstAsk = reAsked[0];
+check('the question goes out once', reAsked.length === 1 && firstAsk.kind === 'bid');
+
+// They drop and rejoin: same seat, new peer id.
+reAsked = [];
+seatPeer = 'PEER2';
+var resent = MP.resendPrompts(1);
+check('coming back gets the same question again',
+      resent === 1 && reAsked.length === 1 && reAsked[0].peer === 'PEER2' &&
+      reAsked[0].id === firstAsk.id && reAsked[0].payload.bid === 40,
+      JSON.stringify(reAsked));
+check('and it is still the same question, not a new one',
+      Object.keys(MP._pending).length === 1);
+
+MP.onReply({ id: firstAsk.id, answer: { bid: 90 } });
+check('their answer, when it comes, still resolves it',
+      auctionAnswer && auctionAnswer.bid === 90, JSON.stringify(auctionAnswer));
+
+/* Carrying on without them instead: everything they were asked is answered
+   the way silence would be, so nothing is left holding the game up. */
+MP._pending = {};
+var answers = {};
+MP.prompt(1, 'bid', {}, { local: function () {}, onReply: function (a) { answers.bid = a; } });
+MP.prompt(1, 'trade', {}, { local: function () {}, onReply: function (a) { answers.trade = a; } });
+MP.prompt(1, 'raiseFunds', {}, { local: function () {}, onReply: function (a) { answers.raise = a; } });
+MP.prompt(0, 'bid', {}, { local: function () { answers.mine = 'local'; }, onReply: function () {} });
+
+MP.abandonPrompts(1);
+check('a seat given up on passes rather than bidding', answers.bid === 'pass');
+check('declines rather than trading', answers.trade === 'decline');
+check('and gives up on a debt it cannot answer for', answers.raise === 'bankrupt');
+check('nothing is left pending for that seat',
+      Object.keys(MP._pending).length === 0, JSON.stringify(Object.keys(MP._pending)));
+
+/* --------------------------------------------------- text off the wire -- */
+
+/* The log is rendered as HTML, because the game's own lines use it for
+   emphasis. A line that arrived from another machine is not the game's. */
+check('a note is escaped before it reaches the log',
+      MP.escapeHtml('<img src=x onerror="boom()">') ===
+      '&lt;img src=x onerror=&quot;boom()&quot;&gt;',
+      MP.escapeHtml('<img src=x onerror="boom()">'));
+
+var logged = [];
+MP.mirror = { ui: { addGameLog: function (line) { logged.push(line); } } };
+MP.onNote('line', { text: '<b>Ada</b> bids $40' });
+check('and nothing from the wire is written as markup',
+      logged.length === 1 && logged[0].indexOf('<b>') < 0, JSON.stringify(logged));
+MP.mirror = null;
+
 /* ------------------------------------------------- ask over the wire ---- */
 
 var net = Net.createFakeNetwork({ schedule: schedule });

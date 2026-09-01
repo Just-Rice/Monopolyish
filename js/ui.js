@@ -360,7 +360,11 @@ class UI {
 
     const owner = prop.owner !== null ? this.game.players[prop.owner] : null;
     const grp = space.group ? COLOR_GROUPS[space.group] : null;
-    const isCurrentOwner = prop.owner === this.game.currentPlayer;
+    /* Managing property is the current player's to do — and only if this is
+       the screen playing them. A guest looking at somebody else's deed was
+       shown Build and Mortgage buttons that the host would refuse. */
+    const ours = typeof MP === 'undefined' || MP.controls(this.game.currentPlayer);
+    const isCurrentOwner = ours && prop.owner === this.game.currentPlayer;
     const canBuild = isCurrentOwner && canBuildHouse(this.game.currentPlayer, spaceId, this.game.state);
     const canSell = isCurrentOwner && canSellHouse(this.game.currentPlayer, spaceId, this.game.state);
     const canMortgage = isCurrentOwner && !prop.mortgaged && (prop.houses || 0) === 0;
@@ -495,8 +499,12 @@ class UI {
     if (!bidders.length) return game.endLandAction();
 
     const settle = () => {
-      if (state.leader >= 0 && state.bid > 0) {
-        game.purchaseProperty(state.leader, spaceId, state.bid);
+      /* The sale can still fall through — the winner's money may have gone
+         somewhere else between the bid and the hammer, and the deed may have
+         been taken. Announcing a win the board did not record left everyone
+         believing they owned something that was still the bank's. */
+      if (state.leader >= 0 && state.bid > 0 &&
+          game.purchaseProperty(state.leader, spaceId, state.bid)) {
         game.stats.perPlayer[state.leader].auctionsWon++;
         this.closeModal();
         const winner = game.players[state.leader];
@@ -505,7 +513,7 @@ class UI {
       } else {
         this.closeModal();
         this.showToast(`${space.name} was not sold.`, 'info');
-        this.announce(`🔨 ${space.name} drew no bids`);
+        this.announce(`🔨 ${space.name} was not sold`);
       }
       game.endLandAction();
     };
