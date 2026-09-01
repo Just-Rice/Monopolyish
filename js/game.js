@@ -1459,33 +1459,34 @@ class Game {
       from.jailCards.push(to.jailCards.pop());
     }
 
-    // Exchange properties
+    /* The deeds all move first, and the interest on any mortgaged ones is
+       billed afterwards. Billing inside the loop meant a player the interest
+       bankrupted had everything they owned returned to the bank half way
+       through — and the rest of the deeds were then handed to someone who was
+       already out of the game. */
+    const owed = [];
     offerPropIds.forEach(id => {
       from.properties = from.properties.filter(p => p !== id);
       to.properties.push(id);
       this.state.properties[id].owner = toId;
-      // 10% interest on mortgaged properties received
-      if (this.state.properties[id].mortgaged) {
-        const space = BOARD_SPACES[id];
-        const interest = Math.floor(space.mortgage * 0.1);
-        // Through the bank's own machinery: taking it straight out of the
-        // balance pushed a player who could not afford it below zero, with no
-        // debt raised and nothing said.
-        this.payMoney(toId, interest, `Interest on ${space.name}`);
-        this.ui.addGameLog(`💸 ${to.name} paid $${interest} interest on mortgaged ${space.name}`);
-      }
+      if (this.state.properties[id].mortgaged) owed.push({ who: toId, id });
     });
     receivePropIds.forEach(id => {
       to.properties = to.properties.filter(p => p !== id);
       from.properties.push(id);
       this.state.properties[id].owner = fromId;
-      // 10% interest on mortgaged properties received
-      if (this.state.properties[id].mortgaged) {
-        const space = BOARD_SPACES[id];
-        const interest = Math.floor(space.mortgage * 0.1);
-        this.payMoney(fromId, interest, `Interest on ${space.name}`);
-        this.ui.addGameLog(`💸 ${from.name} paid $${interest} interest on mortgaged ${space.name}`);
-      }
+      if (this.state.properties[id].mortgaged) owed.push({ who: fromId, id });
+    });
+
+    // 10% interest on every mortgaged deed received, through the bank's own
+    // machinery — taking it straight out of the balance pushed a player who
+    // could not afford it below zero, with no debt raised and nothing said.
+    owed.forEach(({ who, id }) => {
+      if (this.players[who].bankrupt) return;
+      const space = BOARD_SPACES[id];
+      const interest = Math.floor(space.mortgage * 0.1);
+      this.payMoney(who, interest, `Interest on ${space.name}`);
+      this.ui.addGameLog(`💸 ${this.players[who].name} paid $${interest} interest on mortgaged ${space.name}`);
     });
 
     this.stats.perPlayer[fromId].trades++;
@@ -1500,6 +1501,7 @@ class Game {
   // ── Bankruptcy ───────────────────────────────────────────
   declareBankruptcy(playerId, creditorId) {
     const player = this.players[playerId];
+    if (player.bankrupt) return;      // once is enough, and twice paid twice
     player.bankrupt = true;
 
     // Return all buildings to supply

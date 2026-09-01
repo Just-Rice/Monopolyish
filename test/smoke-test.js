@@ -856,6 +856,44 @@ if (typeof G.Game === 'function') {
   interest.executeTrade(0, 1, [1], [], 0, 0, 0, 0);
   check('interest on a mortgaged deed never leaves a player below zero',
         interest.players[1].money >= 0, String(interest.players[1].money));
+
+  /* The deeds move first and the bills follow. Billing inside the transfer
+     meant a player the interest bankrupted had everything returned to the bank
+     half way through, and the rest was handed to someone already out. */
+  var midway = new G.Game(['A', 'B', 'C'], null);
+  [1, 3].forEach(function (id) {
+    midway.state.properties[id].owner = 0;
+    midway.players[0].properties.push(id);
+    midway.state.properties[id].mortgaged = true;
+  });
+  midway.players[1].money = 0;
+  midway.executeTrade(0, 1, [1, 3], [], 0, 0, 0, 0);
+
+  var listedNotOwned = midway.players.reduce(function (bad, p) {
+    return bad.concat(p.properties.filter(function (id) {
+      return midway.state.properties[id].owner !== p.id;
+    }));
+  }, []);
+  var ownedNotListed = Object.keys(midway.state.properties).filter(function (id) {
+    var owner = midway.state.properties[id].owner;
+    return owner !== null && midway.players[owner].properties.indexOf(Number(id)) < 0;
+  });
+  check('a trade that bankrupts someone still leaves the board consistent',
+        listedNotOwned.length === 0 && ownedNotListed.length === 0,
+        JSON.stringify([listedNotOwned, ownedNotListed]));
+  check('and nothing is handed to a player who is already out',
+        midway.players[1].properties.length === 0 || !midway.players[1].bankrupt,
+        JSON.stringify(midway.players[1].properties));
+
+  /* Going bankrupt twice paid the creditor twice. */
+  var twice = new G.Game(['A', 'B'], null);
+  twice.players[0].money = 300;
+  var creditorBefore = twice.players[1].money;
+  twice.declareBankruptcy(0, 1);
+  twice.declareBankruptcy(0, 1);
+  check('a player can only go bankrupt once',
+        twice.players[1].money === creditorBefore + 300,
+        String(twice.players[1].money));
 }
 
 /* --------------------------------------------------------- saving ----- */
