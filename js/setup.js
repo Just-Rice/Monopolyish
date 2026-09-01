@@ -16,9 +16,28 @@
 
   // ── Setup Screen ──────────────────────────────────────────
   function renderPlayerInputs(count) {
-    selectedTokens = Array.from({ length: count }, (_, i) => i);
+    /* Keep the tokens people have picked. This used to reset every one of them
+       to the default on each render — and it renders again every time a player
+       is switched between human and computer, so choosing a token and then
+       changing anything else quietly threw the choice away. */
     for (let i = 0; i < count; i++) {
       if (!playerTypes[i]) playerTypes[i] = { isAI: false, difficulty: null };
+      if (selectedTokens[i] === undefined) {
+        const taken = selectedTokens.slice(0, count);
+        let next = 0;
+        while (taken.indexOf(next) >= 0) next++;
+        selectedTokens[i] = next;
+      }
+    }
+    // Two players cannot share a token, however the list was arrived at.
+    const seen = [];
+    for (let i = 0; i < count; i++) {
+      if (seen.indexOf(selectedTokens[i]) >= 0) {
+        let next = 0;
+        while (seen.indexOf(next) >= 0) next++;
+        selectedTokens[i] = next;
+      }
+      seen.push(selectedTokens[i]);
     }
     const container = document.getElementById('player-inputs');
     container.innerHTML = '';
@@ -145,6 +164,12 @@
     updateAllAIWarning();
   }
 
+  /* Attached once. It used to be added inside the render, so every re-render
+     left another copy of it on the document. */
+  document.addEventListener('click', () => {
+    document.querySelectorAll('.token-picker-grid').forEach(p => p.classList.remove('open'));
+  });
+
   // Close color pickers on outside click
   document.addEventListener('click', () => {
     document.querySelectorAll('.color-picker-popup').forEach(p => p.classList.remove('open'));
@@ -210,10 +235,6 @@
       });
     });
 
-    // Close pickers on outside click
-    document.addEventListener('click', () => {
-      document.querySelectorAll('.token-picker-grid').forEach(p => p.classList.remove('open'));
-    });
   }
 
   // Count buttons

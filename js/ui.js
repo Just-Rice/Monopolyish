@@ -302,11 +302,17 @@ class UI {
   }
 
   // ── Modals ───────────────────────────────────────────────
+  /* `blocking` means the game is waiting on this modal for an answer: buy or
+     auction, a bid, a jail choice, a card, a trade offer, a debt. Those cannot
+     be dismissed — walking away from one leaves the turn with nothing to
+     resolve it and the game cannot be played on. Everything else — a deed you
+     opened to read, the build menu, the trade builder — closes freely. */
   showModal(html, options = {}) {
     const overlay = document.getElementById('modal-overlay');
     const content = document.getElementById('modal-content');
     content.innerHTML = html;
     overlay.classList.add('active');
+    this.blocking = !!options.blocking;
 
     /* Keyboard and screen-reader users need to know a dialog opened, and to
        land inside it rather than at the top of the page. */
@@ -331,6 +337,7 @@ class UI {
   closeModal() {
     document.getElementById('modal-overlay').classList.remove('active');
     this.sticky = null;
+    this.blocking = false;
     const back = this._returnFocusTo;
     this._returnFocusTo = null;
     if (back && back.focus) { try { back.focus(); } catch (e) {} }
@@ -479,7 +486,7 @@ class UI {
         </div>
       </div>`;
 
-    this.showModal(html);
+    this.showModal(html, { blocking: true });
     document.getElementById('modal-buy')?.addEventListener('click', () => { this.closeModal(); onBuy(); });
     document.getElementById('modal-auction')?.addEventListener('click', () => { this.closeModal(); onAuction(); });
   }
@@ -575,6 +582,7 @@ class UI {
     };
 
     document.getElementById('modal-overlay').classList.add('active');
+    this.blocking = true;                 // the auction has to run to a close
     ask(bidders[0]);
   }
 
@@ -606,7 +614,7 @@ class UI {
         </div>
       </div>`;
 
-    this.showModal(html);
+    this.showModal(html, { blocking: true });
 
     document.getElementById('bid-submit')?.addEventListener('click', () => {
       const amount = parseInt(document.getElementById('bid-amount').value, 10);
@@ -648,7 +656,7 @@ class UI {
           <button class="btn btn-primary" id="jail-roll">Roll for Doubles</button>
         </div>
       </div>`;
-    this.showModal(html);
+    this.showModal(html, { blocking: true });
     document.getElementById('jail-pay')?.addEventListener('click', () => { this.closeModal(); onPay(); });
     document.getElementById('jail-card')?.addEventListener('click', () => { this.closeModal(); onCard(); });
     document.getElementById('jail-roll')?.addEventListener('click', () => { this.closeModal(); onRoll(); });
@@ -735,6 +743,7 @@ class UI {
     };
 
     document.getElementById('modal-overlay').classList.add('active');
+    this.blocking = true;                 // the debt has to be settled
     this.setSticky('raiseFunds', [playerId, amountOwed, creditorId, reason]);
     render();
   }
@@ -753,7 +762,7 @@ class UI {
           <button class="btn btn-primary" id="card-ok">OK</button>
         </div>
       </div>`;
-    this.showModal(html);
+    this.showModal(html, { blocking: true });
     document.getElementById('card-ok')?.addEventListener('click', () => {
       this.closeModal();
       onClose();
@@ -953,6 +962,7 @@ class UI {
     };
 
     document.getElementById('modal-overlay').classList.add('active');
+    this.blocking = false;
     render();
   }
 
@@ -992,7 +1002,7 @@ class UI {
         </div>
       </div>`;
 
-    this.showModal(html);
+    this.showModal(html, { blocking: true });
     document.getElementById('trade-yes').addEventListener('click', () => {
       this.closeModal();
       onAccept();
@@ -1023,7 +1033,7 @@ class UI {
         </div>
       </div>`;
 
-    this.showModal(html);
+    this.showModal(html, { blocking: true });
     document.getElementById('anywhere-go').addEventListener('click', () => {
       const value = parseInt(document.getElementById('anywhere-space').value, 10);
       this.closeModal();
@@ -1163,7 +1173,7 @@ class UI {
         </div>
       </div>`;
 
-    this.showModal(html);
+    this.showModal(html, { blocking: true });
     document.getElementById('gameover-again')?.addEventListener('click', () => {
       if (typeof Save !== 'undefined') Save.clear();
       location.reload();

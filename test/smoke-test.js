@@ -649,6 +649,44 @@ if (typeof G.Game === 'function') {
         debtor.canEndTurn() === false && debtor.canRoll() === false);
 }
 
+/* ---------------------------------------------- questions and answers -- */
+
+/* Some modals are questions the game is waiting on, and walking away from one
+   leaves the turn with nothing to resolve it — pressing Escape on the buy
+   prompt left the board unplayable. Each modal says which it is. */
+if (typeof G.Game === 'function') {
+  var q = new G.Game(['A', 'B'], null);
+  q.showBuildMenu();
+  check('the build menu is yours to close', q.ui.blocking === false, String(q.ui.blocking));
+
+  q.ui.showPropertyModal(1);
+  check('so is a deed you opened to read', q.ui.blocking === false);
+
+  q.ui.showBuyModal(1, function () {}, function () {});
+  check('buy or auction is a question, and stays put', q.ui.blocking === true);
+
+  q.ui.closeModal();
+  check('and closing a modal clears it again', q.ui.blocking === false);
+
+  q.ui.showJailModal(q.players[0], function () {}, function () {}, function () {});
+  check('the jail choice is a question too', q.ui.blocking === true);
+
+  q.ui.showCardModal({ text: 'a card' }, 'chance', function () {});
+  check('so is a card waiting to be acknowledged', q.ui.blocking === true);
+
+  q.ui.showTradeOfferModal({ fromId: 0, toId: 1, giveProps: [], getProps: [],
+                             giveMoney: 10, getMoney: 0 },
+                           function () {}, function () {});
+  check('and an offer put to you', q.ui.blocking === true);
+
+  q.ui.showRaiseFundsModal(0, 200, 1, 'Rent');
+  check('a debt cannot be dismissed', q.ui.blocking === true);
+
+  q.ui.closeModal();
+  q.ui.showTradeModal();
+  check('but the trade builder is your own', q.ui.blocking === false);
+}
+
 /* ------------------------------------------------------ money at rest -- */
 
 /* Nothing may mint money. Each of these cards moves money between players, and
@@ -1072,6 +1110,35 @@ if (typeof G.AIPlayer === 'function' && typeof G.Game === 'function') {
         Object.keys(picked).length > 1, Object.keys(picked).join(','));
   check('a named personality is the one you get',
         new G.AIPlayer(0, 'medium', 'miser').personality === 'miser');
+}
+
+/* -------------------------------------------- the computer under water -- */
+
+if (typeof G.Game === 'function') {
+  var broke = new G.Game(['CPU', 'B'], null, {
+    aiConfigs: [{ isAI: true, difficulty: 'hard' }, { isAI: false }]
+  });
+  [11, 13, 14].forEach(function (id) {
+    broke.state.properties[id].owner = 0;
+    broke.players[0].properties.push(id);
+    broke.state.properties[id].houses = 2;
+  });
+  broke.players[0].money = 0;
+
+  var plan = broke.getAI(0).decideRaiseFunds(2000, broke);
+  var sells = plan.filter(function (a) { return a.action === 'sell'; });
+  var mortgages = plan.filter(function (a) { return a.action === 'mortgage'; });
+  /* The plan used to read the houses off the board, which it had not touched
+     yet, so it planned the same four sales over and over — forty deep, each
+     surplus one refused when the plan was carried out. */
+  check('a plan never sells more buildings than are standing',
+        sells.length <= 6, sells.length + ' sales for 6 houses');
+  check('and never mortgages the same deed twice',
+        mortgages.length === new Set(mortgages.map(function (a) { return a.spaceId; })).size,
+        JSON.stringify(mortgages));
+  check('a player with nothing to sell plans nothing',
+        new G.Game(['CPU', 'B'], null, { aiConfigs: [{ isAI: true }, { isAI: false }] })
+          .getAI(0).decideRaiseFunds(500, new G.Game(['CPU', 'B'], null)).length === 0);
 }
 
 /* ------------------------------------------------------------- saves --- */

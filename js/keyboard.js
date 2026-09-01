@@ -87,11 +87,12 @@
 
     if (key === 'Escape') {
       /* Only modals that are safe to walk away from. A question the game is
-         waiting on — buy or auction, a bid, a debt — stays put, because
-         dismissing it would leave the turn stuck. */
+         waiting on — buy or auction, a bid, a jail choice, a card, a debt —
+         says so itself, because guessing from what the modal looks like got
+         the buy prompt wrong: dismissing it left the turn with nothing to
+         resolve it, and the game could not be played on. */
       const game = window._game || (typeof MP !== 'undefined' && MP.mirror);
-      const dismissible = game && game.ui && !game.ui.sticky &&
-                          !document.querySelector('.auction-modal, .raise-funds-modal, .card-modal, .gameover-modal');
+      const dismissible = game && game.ui && !game.ui.blocking && !game.ui.sticky;
       if (modalOpen() && dismissible) {
         e.preventDefault();
         game.ui.closeModal();

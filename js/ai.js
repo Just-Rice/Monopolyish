@@ -545,12 +545,17 @@ class AIPlayer {
 
     for (const id of withBuildings) {
       if (available >= amountNeeded) break;
-      while ((game.state.properties[id]?.houses || 0) > 0 &&
-             canSellHouse(this.playerId, id, game.state) &&
-             available < amountNeeded) {
-        const value = Math.floor((BOARD_SPACES[id].housePrice || 0) / 2);
+      if (!canSellHouse(this.playerId, id, game.state)) continue;
+      /* Counted down as the plan is made. The loop used to read the houses
+         straight off the board, which the plan has not touched yet — so it
+         planned to sell the same four houses over and over, forty deep, and
+         every surplus sale came back refused when the plan was carried out. */
+      let remaining = game.state.properties[id].houses || 0;
+      const value = Math.floor((BOARD_SPACES[id].housePrice || 0) / 2);
+      while (remaining > 0 && value > 0 && available < amountNeeded) {
         actions.push({ action: 'sell', spaceId: id });
         available += value;
+        remaining--;
       }
     }
 
