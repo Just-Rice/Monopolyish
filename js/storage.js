@@ -30,7 +30,12 @@ const Save = {
       turnNumber: game.turnNumber || 0,
       elapsedMs: game.elapsedMs(),
       currentPlayer: game.currentPlayer,
-      phase: game.phase === 'debt' ? 'action' : game.phase,
+      /* Only the three phases a turn can be picked up from. A save taken while
+         a square was still being resolved — buying a property is one of the
+         moments a game is written out — came back as a turn that could
+         neither roll nor end, and the game could not be played on. Anything
+         mid-move resumes as a turn that has been rolled and can be ended. */
+      phase: ['roll', 'action', 'rolled'].indexOf(game.phase) >= 0 ? game.phase : 'action',
       doublesCount: game.doublesCount,
       lastRoll: game.lastRoll,
       lastDiceRoll: game.lastDiceRoll,

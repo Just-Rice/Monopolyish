@@ -761,6 +761,17 @@ class Game {
     const space = BOARD_SPACES[spaceId];
     const player = this.players[playerId];
 
+    /* The two "pay extra when you get there" flags belong to this landing and
+       nothing else, so they are spent here whatever the square turns out to
+       be. They used to be cleared only where rent was actually charged — so a
+       card that sent you to a railroad nobody owned left "pay double" set, and
+       the next rent in the same turn, on any square, was charged at twice its
+       value. */
+    const doubleRent = this._doubleRentModifier;
+    const utilityTenX = this._utilityTenX;
+    this._doubleRentModifier = false;
+    this._utilityTenX = false;
+
     if (!prop) {
       this.phase = this.lastRoll?.doubles ? 'roll' : 'action';
       this.ui.updateAll();
@@ -818,14 +829,8 @@ class Game {
       let rent = calculateRent(spaceId, { ...this.state, lastDiceRoll: this.lastDiceRoll });
 
       // Double rent modifiers from cards
-      if (this._doubleRentModifier) {
-        rent *= 2;
-        this._doubleRentModifier = false;
-      }
-      if (this._utilityTenX && space.type === 'utility') {
-        rent = 10 * this.lastDiceRoll;
-        this._utilityTenX = false;
-      }
+      if (doubleRent) rent *= 2;
+      if (utilityTenX && space.type === 'utility') rent = 10 * this.lastDiceRoll;
 
       const owner = this.players[prop.owner];
       this.ui.showToast(`${player.name} pays $${rent} rent to ${owner.name} for ${space.name}!`, 'money');

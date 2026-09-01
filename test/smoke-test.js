@@ -738,6 +738,58 @@ if (typeof G.Game === 'function') {
   }
 }
 
+/* ------------------------------------------ what a card charges extra -- */
+
+/* "Advance to the nearest railroad and pay double" and "…the nearest utility
+   and pay ten times the roll" belong to the square the card sends you to. If
+   nobody owns it, there is nothing to pay — and the instruction has to expire
+   there rather than doubling the next rent that happens to come along. */
+if (typeof G.Game === 'function') {
+  var extra = new G.Game(['A', 'B'], null);
+  extra.currentPlayer = 0;
+  extra.lastRoll = { d1: 1, d2: 2, total: 3, doubles: true };
+  extra._doubleRentModifier = true;
+  extra.handlePropertyLanding(0, 5);            // an unowned railroad
+  check('"pay double" is spent on the square the card sent you to',
+        extra._doubleRentModifier === false);
+
+  extra.state.properties[1].owner = 1;
+  extra.players[1].properties.push(1);
+  var before = extra.players[0].money;
+  extra.handlePropertyLanding(0, 1);
+  check('so the next rent is the rent, not twice the rent',
+        before - extra.players[0].money === G.BOARD_SPACES[1].rent[0],
+        String(before - extra.players[0].money));
+
+  var tenx = new G.Game(['A', 'B'], null);
+  tenx.currentPlayer = 0;
+  tenx.lastDiceRoll = 9;
+  tenx.lastRoll = { d1: 4, d2: 5, total: 9, doubles: false };
+  tenx._utilityTenX = true;
+  tenx.handlePropertyLanding(0, 12);            // an unowned utility
+  check('and so is "ten times the roll"', tenx._utilityTenX === false);
+
+  tenx.state.properties[28].owner = 1;
+  tenx.players[1].properties.push(28);
+  var beforeUtil = tenx.players[0].money;
+  tenx.handlePropertyLanding(0, 28);
+  check('leaving one utility charging four times the roll',
+        beforeUtil - tenx.players[0].money === 36,
+        String(beforeUtil - tenx.players[0].money));
+
+  /* And when the square is owned, the card's instruction does apply. */
+  var owed = new G.Game(['A', 'B'], null);
+  owed.currentPlayer = 0;
+  owed.state.properties[5].owner = 1;
+  owed.players[1].properties.push(5);
+  owed.lastRoll = { d1: 1, d2: 2, total: 3, doubles: false };
+  owed._doubleRentModifier = true;
+  var cash = owed.players[0].money;
+  owed.handlePropertyLanding(0, 5);
+  check('a card that says pay double, on a railroad someone owns, pays double',
+        cash - owed.players[0].money === 50, String(cash - owed.players[0].money));
+}
+
 /* ------------------------------------------------ a move in flight ----- */
 
 if (typeof G.Game === 'function') {
@@ -1189,6 +1241,24 @@ if (typeof G.Save !== 'undefined' && typeof G.Game === 'function') {
         restored.decks.chanceIndex === 4);
   check('and they are the real cards, not the ids they travelled as',
         typeof restored.decks.chance[0].action === 'function');
+
+  /* A game is written out at the moments things change hands, and buying a
+     property is one of them — which happens while the square is still being
+     resolved. Saving that phase verbatim gave back a turn that could neither
+     roll nor be ended. */
+  ['rolling', 'landed', 'waiting', 'debt', 'over'].forEach(function (phase) {
+    var mid = new G.Game(['A', 'B'], null);
+    mid.phase = phase;
+    check('a save taken during "' + phase + '" resumes as a turn you can finish',
+          ['roll', 'action', 'rolled'].indexOf(G.Save.serialize(mid).phase) >= 0,
+          G.Save.serialize(mid).phase);
+  });
+  ['roll', 'action', 'rolled'].forEach(function (phase) {
+    var settled = new G.Game(['A', 'B'], null);
+    settled.phase = phase;
+    check('and a settled "' + phase + '" is saved as it stands',
+          G.Save.serialize(settled).phase === phase);
+  });
 
   check('a save from another version is refused',
         G.Save.apply(new G.Game(['A', 'B'], null), { version: 999 }) === false);
