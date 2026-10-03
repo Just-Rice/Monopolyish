@@ -326,12 +326,14 @@ html, body {
   margin: 0 auto;
 }
 .raise-funds-modal h2 {
+  padding-top: 24px;
   text-align: center;
   font-family: 'Outfit', sans-serif;
   font-size: 1.5rem;
   margin-bottom: 12px;
   color: var(--warning);
 }
+.debt-info, .raise-funds-actions { margin-left: 24px; margin-right: 24px; }
 .debt-info {
   background: var(--bg-card2);
   border: 1px solid var(--border);
@@ -710,20 +712,34 @@ html, body {
    ══════════════════════════════════════════════════════════ */
 .token-container {
   position: absolute;
-  bottom: 2px; left: 50%;
-  transform: translateX(-50%);
-  display: flex; gap: 3px;
+  bottom: 2px; left: 0; right: 0;
+  display: flex; justify-content: center; gap: 3px;
   z-index: 10;
+  /* Tokens size themselves to the square's width so they are never clipped
+     by its edges (browsers without container units keep the fixed 32px). */
+  container-type: inline-size;
 }
 
 .player-token {
   width: 32px; height: 32px;
+  width: min(32px, 45cqw); height: min(32px, 45cqw);
+  flex-shrink: 0;
   border-radius: 50%;
   display: flex; align-items: center; justify-content: center;
   font-size: 0.9rem;
+  font-size: min(0.9rem, 20cqw);
   border: 2.5px solid rgba(255,255,255,0.9);
   z-index: 10;
   box-shadow: 0 2px 8px rgba(0,0,0,0.5);
+}
+
+/* Three or four tokens on one square: smaller, overlapping chips. */
+.token-container:has(> :nth-child(3)) { gap: 0; }
+.token-container:has(> :nth-child(3)) .player-token {
+  width: min(32px, 30cqw); height: min(32px, 30cqw); font-size: min(0.9rem, 13.5cqw);
+}
+.token-container:has(> :nth-child(3)) .player-token + .player-token {
+  margin-left: calc(min(32px, 30cqw) * -0.35);
 }
 
 /* Only animate tokens that actually moved */
@@ -877,6 +893,7 @@ canvas.die { border-radius: 8px; box-shadow: 0 3px 12px rgba(0,0,0,0.4); }
   opacity: 0; pointer-events: none; transition: opacity 0.3s;
 }
 #modal-overlay.active { opacity: 1; pointer-events: all; }
+#modal-content:focus { outline: none; }
 
 #modal-content {
   background: var(--bg-card2); border: 1px solid var(--border-bright);
@@ -993,6 +1010,7 @@ canvas.die { border-radius: 8px; box-shadow: 0 3px 12px rgba(0,0,0,0.4); }
   background-clip: text; margin-bottom: 8px;
 }
 .gameover-modal p { color: var(--text-muted); margin-top: 8px; }
+.gameover-modal .btn { margin: 20px auto 0; }
 
 /* ══════════════════════════════════════════════════════════════
    TOASTS
@@ -1025,14 +1043,26 @@ canvas.die { border-radius: 8px; box-shadow: 0 3px 12px rgba(0,0,0,0.4); }
 ::-webkit-scrollbar-thumb { background: var(--border-bright); border-radius: 2px; }
 ::-webkit-scrollbar-thumb:hover { background: var(--gold-dark); }
 
-/* Phones and narrow tablets: stack board, turn controls, then players/log in
-   one scrolling column so the Roll / End Turn buttons stay reachable. */
-@media (max-width: 900px) {
+/* Phones and tablets: stack board, turn controls, then players/log in one
+   scrolling column so the Roll / End Turn buttons stay reachable. 1080px is
+   where the three columns plus the 520px board minimum stop fitting. */
+@media (max-width: 1080px) {
   #game-screen.active {
     display: flex; flex-direction: column;
     height: auto; min-height: 100vh; overflow: visible;
   }
-  #board-container { order: 1; padding: 8px; }
+  #board-container {
+    order: 1; padding: 8px;
+    flex-direction: column; align-items: center; gap: 6px;
+  }
+  #board-container .board-zoom-btn { display: inline-flex; }
+  #board-container.zoomed #board-scroll {
+    width: min(calc(100vw - 16px), 640px);
+    height: min(calc(100vw - 16px), 640px);
+    overflow: auto; overscroll-behavior: contain;
+    border-radius: 6px;
+  }
+  #board-container.zoomed #board-grid { zoom: 2.5; }
   #right-panel { order: 2; border-left: none; border-top: 1px solid var(--border); }
   #left-panel  { order: 3; border-right: none; border-top: 1px solid var(--border); }
   #board-grid {
@@ -1216,13 +1246,23 @@ canvas.die { border-radius: 8px; box-shadow: 0 3px 12px rgba(0,0,0,0.4); }
   outline: 2px solid var(--gold-light); outline-offset: 2px;
 }
 
+/* Board zoom toggle — shown only in the stacked (phone/tablet) layout. */
+.board-zoom-btn {
+  display: none; align-self: flex-end; align-items: center; gap: 6px;
+  padding: 6px 12px; border-radius: 999px;
+  background: var(--bg-mid); color: var(--text);
+  border: 1px solid var(--border-bright);
+  font: 600 0.8rem 'Outfit', sans-serif; cursor: pointer;
+}
+.board-space:focus-visible { outline: 3px solid #1a1200; outline-offset: -3px; z-index: 3; }
+
 /* The colour dot is a <button> so it can be reached by keyboard. */
 .token-color-dot { display: block; padding: 0; appearance: none; -webkit-appearance: none; }
 
 /* Touch screens: bring controls up to a ~44px tap target. Desktop
    (fine pointer) keeps its current sizing. */
 @media (pointer: coarse) {
-  .btn, .seat-btn, .setup-tab, .btn-lobby-back { min-height: 44px; }
+  .btn, .seat-btn, .setup-tab, .btn-lobby-back, .board-zoom-btn { min-height: 44px; }
   .type-toggle { width: 40px; height: 40px; }
   .diff-btn { min-height: 40px; }
   .token-option { width: 44px; height: 44px; }

@@ -5,6 +5,59 @@
 //  UI MODULE - Modals, Toasts, Dashboard Updates
 // ============================================================
 
+// Keyboard handling for the shared modal: focus moves into it when it opens,
+// Tab stays inside it, Esc presses its Close/Cancel button when it has one,
+// and focus goes back to where it was when it closes.
+const ModalFocus = {
+  returnTo: null,
+
+  focusable(root) {
+    return Array.from(root.querySelectorAll(
+      'button:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])'
+    )).filter(el => el.offsetParent !== null);
+  },
+
+  show() {
+    const overlay = document.getElementById('modal-overlay');
+    if (!overlay.contains(document.activeElement)) this.returnTo = document.activeElement;
+    overlay.classList.add('active');
+    overlay.inert = false;
+    document.getElementById('modal-content').focus({ preventScroll: true });
+  },
+
+  // A closed modal keeps its last contents in the page; `inert` keeps those
+  // stale buttons out of the Tab order and away from screen readers.
+  hide() {
+    const overlay = document.getElementById('modal-overlay');
+    overlay.classList.remove('active');
+    overlay.inert = true;
+    const el = this.returnTo;
+    this.returnTo = null;
+    if (el && el.isConnected && !el.disabled) el.focus({ preventScroll: true });
+  },
+};
+
+document.addEventListener('keydown', (e) => {
+  const overlay = document.getElementById('modal-overlay');
+  if (!overlay || !overlay.classList.contains('active')) return;
+  const content = document.getElementById('modal-content');
+
+  if (e.key === 'Escape') {
+    const dismiss = content.querySelector('[id$="-close"], [id$="-cancel"]');
+    if (dismiss) { e.preventDefault(); dismiss.click(); }
+    return;
+  }
+  if (e.key !== 'Tab') return;
+
+  const items = ModalFocus.focusable(content);
+  const active = document.activeElement;
+  if (!items.length) { e.preventDefault(); content.focus(); return; }
+  const first = items[0], last = items[items.length - 1];
+  if (!content.contains(active)) { e.preventDefault(); (e.shiftKey ? last : first).focus(); }
+  else if (e.shiftKey && (active === first || active === content)) { e.preventDefault(); last.focus(); }
+  else if (!e.shiftKey && active === last) { e.preventDefault(); first.focus(); }
+});
+
 class UI {
   constructor(game) {
     this.game = game;
@@ -141,7 +194,7 @@ class UI {
       if (!spaceEl) return;
       const tokenContainer = spaceEl.querySelector('.token-container') || spaceEl;
 
-      players.forEach((entry, offset) => {
+      players.forEach((entry) => {
         const token = document.createElement('div');
         token.className = 'player-token';
         // Only add hop animation to tokens that actually moved
@@ -150,7 +203,6 @@ class UI {
         }
         token.textContent = entry.player.token.emoji;
         token.style.background = entry.player.color;
-        token.style.transform = `translate(${offset * 20}px, 0)`;
         token.title = entry.player.name;
         tokenContainer.appendChild(token);
       });
@@ -245,12 +297,12 @@ class UI {
     const overlay = document.getElementById('modal-overlay');
     const content = document.getElementById('modal-content');
     content.innerHTML = html;
-    overlay.classList.add('active');
+    ModalFocus.show();
 
     if (options.onClose) {
       overlay.addEventListener('click', (e) => {
         if (e.target === overlay) {
-          overlay.classList.remove('active');
+          ModalFocus.hide();
           options.onClose();
         }
       }, { once: true });
@@ -258,7 +310,7 @@ class UI {
   }
 
   closeModal() {
-    document.getElementById('modal-overlay').classList.remove('active');
+    ModalFocus.hide();
   }
 
   showPropertyModal(spaceId) {
@@ -498,7 +550,7 @@ class UI {
       setTimeout(render, 100);
     };
 
-    document.getElementById('modal-overlay').classList.add('active');
+    ModalFocus.show();
     render();
   }
 
@@ -596,7 +648,7 @@ class UI {
       });
     };
 
-    document.getElementById('modal-overlay').classList.add('active');
+    ModalFocus.show();
     render();
   }
 
@@ -747,7 +799,7 @@ class UI {
       document.getElementById('trade-cancel').addEventListener('click', () => this.closeModal());
     };
 
-    document.getElementById('modal-overlay').classList.add('active');
+    ModalFocus.show();
     render();
   }
 

@@ -104,6 +104,7 @@ El.prototype.getBoundingClientRect = function () {
   return { left: 0, top: 0, width: 400, height: 400 };
 };
 El.prototype.focus = function () {};
+El.prototype.contains = function () { return false; };
 El.prototype.scrollIntoView = function () {};
 El.prototype.closest = function () { return null; };
 El.prototype.click = function () {

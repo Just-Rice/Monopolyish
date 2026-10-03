@@ -134,7 +134,10 @@
 
   <!-- CENTER: Board -->
   <main id="board-container">
-    <div id="board-grid"></div>
+    <button class="board-zoom-btn" id="btn-board-zoom" aria-pressed="false">🔍 Zoom board</button>
+    <div id="board-scroll">
+      <div id="board-grid"></div>
+    </div>
   </main>
 
   <!-- RIGHT PANEL: Current player + dice + actions -->
@@ -195,8 +198,8 @@
 <!-- ══════════════════════════════════════════════════════════
      MODAL
 ══════════════════════════════════════════════════════════ -->
-<div id="modal-overlay">
-  <div id="modal-content" role="dialog" aria-modal="true" aria-label="Game prompt"></div>
+<div id="modal-overlay" inert>
+  <div id="modal-content" role="dialog" aria-modal="true" aria-label="Game prompt" tabindex="-1"></div>
 </div>
 
 <!-- ══════════════════════════════════════════════════════════

@@ -5,6 +5,18 @@
 //  BOARD RENDERER — v3 (fixed text direction, centering, tiles)
 // ============================================================
 
+// On a phone the board is drawn at screen width, which leaves its labels too
+// small to read. The zoom button scales it up inside a frame you can scroll.
+(function setupBoardZoom() {
+  const btn = document.getElementById('btn-board-zoom');
+  if (!btn) return;
+  btn.addEventListener('click', () => {
+    const on = document.getElementById('board-container').classList.toggle('zoomed');
+    btn.setAttribute('aria-pressed', String(on));
+    btn.textContent = on ? '↙ Fit board' : '🔍 Zoom board';
+  });
+})();
+
 function spaceIcon(space) {
   switch (space.type) {
     case 'go':
@@ -61,13 +73,16 @@ function buildSpace(space, side) {
                data-space="${space.id}"
                data-type="${space.type}"
                ${space.group ? `data-group="${space.group}"` : ''}
-               title="${space.name}">
+               title="${space.name}"
+               tabindex="-1" aria-label="${space.name}${space.price ? ', $' + space.price : ''}">
       ${innerContent}
       <div class="token-container"></div>
     </div>`;
 }
 
 function renderBoard(container) {
+  // Redrawing replaces the squares, so remember which one had keyboard focus.
+  const hadFocus = container.contains(document.activeElement);
   container.innerHTML = '';
 
   // Compute grid positions for all 40 spaces
@@ -121,4 +136,52 @@ function renderBoard(container) {
       <div class="board-subtitle">Classic Edition</div>
     </div>`;
   container.appendChild(center);
+
+  setupBoardKeyboard(container, hadFocus);
+}
+
+// The board is one tab stop. Arrow keys walk the squares in board order
+// (Right/Down = next square, Left/Up = previous), Home goes to GO, and
+// Enter or Space opens the square like a click does.
+function setupBoardKeyboard(container, refocus) {
+  container.setAttribute('role', 'group');
+  container.setAttribute('aria-label', 'Board: use the arrow keys to move between squares, Enter to open one');
+
+  const current = parseInt(container.dataset.focusSpace || '0', 10);
+  const spaceEl = id => container.querySelector(`[data-space="${id}"]`);
+  const start = spaceEl(current);
+  if (start) {
+    start.tabIndex = 0;
+    if (refocus) start.focus({ preventScroll: true });
+  }
+
+  if (container.dataset.keyboardReady) return;
+  container.dataset.keyboardReady = '1';
+  container.addEventListener('keydown', (e) => {
+    const from = e.target.closest('[data-space]');
+    if (!from || !container.contains(from)) return;
+    const id = parseInt(from.dataset.space, 10);
+    let next = null;
+    switch (e.key) {
+      case 'ArrowRight': case 'ArrowDown': next = (id + 1) % 40; break;
+      case 'ArrowLeft':  case 'ArrowUp':   next = (id + 39) % 40; break;
+      case 'Home': next = 0; break;
+      case 'End':  next = 39; break;
+      case 'Enter': case ' ':
+        e.preventDefault();
+        from.click();
+        return;
+      default: return;
+    }
+    e.preventDefault();
+    spaceEl(next)?.focus();
+  });
+  // Whichever square gets focus, by key or by click, becomes the tab stop.
+  container.addEventListener('focusin', (e) => {
+    const to = e.target.closest('[data-space]');
+    if (!to) return;
+    container.querySelectorAll('[data-space][tabindex="0"]').forEach(el => { el.tabIndex = -1; });
+    to.tabIndex = 0;
+    container.dataset.focusSpace = to.dataset.space;
+  });
 }
