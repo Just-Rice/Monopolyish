@@ -37,7 +37,7 @@ js/
   ui.js           panels, toasts and modals
   game.js         the Game class: turn flow
   setup.js        the setup screen
-test/             two headless suites, run with ./test/run.sh
+test/             two headless suites (./test/run.sh) and a browser load test
 vendor/peerjs.min.js
 ```
 
@@ -73,6 +73,16 @@ here — with duplicate and unknown replies ignored.
 
 Neither suite proves two real browsers connect, and the host-only modal flows
 are not covered.
+
+`load-test.js` runs in a real browser through Playwright (Node, not
+JavaScriptCore): it opens the game at a phone (390×844) and a desktop
+viewport, starts a game, and fails on any console error, sideways scrolling,
+or a Roll Dice button that is off screen.
+
+```sh
+npm i --no-save playwright && npx playwright install chromium
+node test/load-test.js
+```
 
 ## Online play
 

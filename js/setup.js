@@ -30,13 +30,14 @@
       const dotColor = playerColors[i] || ALL_TOKENS[selectedTokens[i]].color;
       row.innerHTML = `
         <div class="token-picker-wrapper">
-          <button class="token-selected" id="token-btn-${i}" title="Click to change token">
+          <button class="token-selected" id="token-btn-${i}" title="Click to change token"
+                  aria-label="Change token for player ${i + 1}">
             ${ALL_TOKENS[selectedTokens[i]].emoji}
           </button>
           <div class="token-picker-grid" id="token-picker-${i}">
             ${ALL_TOKENS.map((t, ti) => `
               <button class="token-option ${ti === selectedTokens[i] ? 'chosen' : ''}"
-                      data-player="${i}" data-token="${ti}" title="${t.name}">
+                      data-player="${i}" data-token="${ti}" title="${t.name}" aria-label="${t.name}">
                 ${t.emoji}
               </button>
             `).join('')}
@@ -44,20 +45,24 @@
         </div>
         <input type="text" id="player-name-${i}"
           placeholder="${pt.isAI ? 'CPU name' : `Player ${i + 1} name`}"
-          value="${defaultName}" maxlength="18" autocomplete="off">
+          value="${defaultName}" maxlength="18" autocomplete="off"
+          aria-label="Player ${i + 1} name">
         <div class="player-type-controls">
-          <button class="type-toggle ${!pt.isAI ? 'active' : ''}" data-player="${i}" data-type="human">👤</button>
-          <button class="type-toggle ${pt.isAI ? 'active' : ''}" data-player="${i}" data-type="ai">🤖</button>
+          <button class="type-toggle ${!pt.isAI ? 'active' : ''}" data-player="${i}" data-type="human"
+                  aria-label="Player ${i + 1} is human" aria-pressed="${!pt.isAI}">👤</button>
+          <button class="type-toggle ${pt.isAI ? 'active' : ''}" data-player="${i}" data-type="ai"
+                  aria-label="Player ${i + 1} is computer" aria-pressed="${pt.isAI}">🤖</button>
         </div>
         <div class="color-picker-wrapper">
-          <span class="token-color-dot" id="color-dot-${i}"
-                style="background:${dotColor}" title="Click to change color"></span>
+          <button type="button" class="token-color-dot" id="color-dot-${i}"
+                style="background:${dotColor}" title="Click to change color"
+                aria-label="Change colour for player ${i + 1}"></button>
           <div class="color-picker-popup" id="color-popup-${i}">
             <div class="color-grid">
               ${COLOR_PALETTE.map(c => `
                 <button class="color-swatch ${c === dotColor ? 'chosen' : ''}"
                         data-player="${i}" data-color="${c}"
-                        style="background:${c}" title="${c}"></button>
+                        style="background:${c}" title="${c}" aria-label="Colour ${c}"></button>
               `).join('')}
             </div>
           </div>
