@@ -44,7 +44,7 @@
         <span class="toggle-label">🅿️ Free Parking Pot</span>
         <span class="toggle-sublabel">(House Rule)</span>
         <label class="toggle-switch">
-          <input type="checkbox" id="free-parking-toggle" checked>
+          <input type="checkbox" id="free-parking-toggle" checked aria-label="Free Parking pot (house rule)">
           <span class="toggle-slider"></span>
         </label>
       </label>
@@ -67,7 +67,7 @@
       </div>
 
       <div id="join-row" hidden>
-        <input id="join-code" class="mp-code-input" maxlength="9" placeholder="ROOM CODE"
+        <input id="join-code" class="mp-code-input" maxlength="9" placeholder="ROOM CODE" aria-label="Room code"
                autocomplete="off" spellcheck="false">
       </div>
 
@@ -122,7 +122,7 @@
 <div id="game-screen">
 
   <!-- LEFT PANEL: Player info + Log -->
-  <aside id="left-panel">
+  <aside id="left-panel" aria-label="Players and game log">
     <div class="panel-title">Players</div>
     <div id="player-panels"></div>
 
@@ -134,11 +134,14 @@
 
   <!-- CENTER: Board -->
   <main id="board-container">
-    <div id="board-grid"></div>
+    <button class="board-zoom-btn" id="btn-board-zoom" aria-pressed="false">🔍 Zoom board</button>
+    <div id="board-scroll">
+      <div id="board-grid"></div>
+    </div>
   </main>
 
   <!-- RIGHT PANEL: Current player + dice + actions -->
-  <aside id="right-panel">
+  <aside id="right-panel" aria-label="Turn controls">
 
     <!-- Current Player -->
     <div class="current-player-card">
@@ -156,8 +159,8 @@
     <div class="dice-section">
       <div class="dice-label">Roll the Dice</div>
       <div class="dice-display">
-        <canvas id="dice1" class="die" width="72" height="72"></canvas>
-        <canvas id="dice2" class="die" width="72" height="72"></canvas>
+        <canvas id="dice1" class="die" width="72" height="72" role="img" aria-label="Die 1"></canvas>
+        <canvas id="dice2" class="die" width="72" height="72" role="img" aria-label="Die 2"></canvas>
       </div>
       <div class="doubles-indicator" id="doubles-indicator"></div>
     </div>
@@ -195,14 +198,14 @@
 <!-- ══════════════════════════════════════════════════════════
      MODAL
 ══════════════════════════════════════════════════════════ -->
-<div id="modal-overlay">
-  <div id="modal-content"></div>
+<div id="modal-overlay" inert>
+  <div id="modal-content" role="dialog" aria-modal="true" aria-label="Game prompt" tabindex="-1"></div>
 </div>
 
 <!-- ══════════════════════════════════════════════════════════
      TOASTS
 ══════════════════════════════════════════════════════════ -->
-<div id="toast-container"></div>
+<div id="toast-container" role="status" aria-live="polite"></div>
 
 
 <script src="js/property.js"></script>
