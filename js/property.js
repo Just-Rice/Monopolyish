@@ -82,8 +82,6 @@ function calculateRent(spaceId, gameState) {
   const prop = gameState.properties[spaceId];
   if (!prop || prop.owner === null || prop.mortgaged) return 0;
 
-  const owner = gameState.players[prop.owner];
-
   if (space.type === 'railroad') {
     const railroadsOwned = [5, 15, 25, 35].filter(
       id => gameState.properties[id]?.owner === prop.owner && !gameState.properties[id]?.mortgaged

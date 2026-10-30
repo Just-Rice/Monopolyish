@@ -91,15 +91,21 @@ MP.snapshot = function (game) {
         id: p.id, name: p.name, token: p.token, color: p.color,
         money: p.money, position: p.position,
         inJail: p.inJail, jailTurns: p.jailTurns,
-        getOutOfJailCards: p.getOutOfJailCards,
+        /* The guest's screen draws these exactly as the host's does (the
+           deeds in each panel, the jail-card count, the jail and raise-funds
+           modals), so it needs them; without them every redraw threw. */
+        properties: (p.properties || []).slice(),
+        jailCards: (p.jailCards || []).map(function (c) { return { deckType: c && c.deckType }; }),
         bankrupt: p.bankrupt, isAI: p.isAI
       };
     }),
-    properties: game.state.properties.map(function (pr) {
-      return pr && {
-        owner: pr.owner, houses: pr.houses, mortgaged: pr.mortgaged
-      };
-    }),
+    /* Keyed by space id, as in the game: it is an object there, not an array,
+       so .map() threw and no snapshot ever left the host. */
+    properties: Object.keys(game.state.properties).reduce(function (out, id) {
+      var pr = game.state.properties[id];
+      out[id] = pr && { owner: pr.owner, houses: pr.houses, mortgaged: pr.mortgaged };
+      return out;
+    }, {}),
     freeParkingPot: game.state.freeParkingPot,
     housesAvailable: game.state.housesAvailable,
     hotelsAvailable: game.state.hotelsAvailable,
@@ -138,10 +144,12 @@ MP.buildMirror = function (snap) {
     getAI: function () { return null; },
     /* Anything a guest tries to do locally becomes an intent instead. */
     purchaseProperty: function () { MP.send({ kind: 'buy' }); },
-    buildHouse:       function (pid, sid) { MP.send({ kind: 'build', spaceId: sid }); },
-    sellHouse:        function (pid, sid) { MP.send({ kind: 'sell', spaceId: sid }); },
-    mortgageProperty: function (pid, sid) { MP.send({ kind: 'mortgage', spaceId: sid }); },
-    unmortgageProperty: function (pid, sid) { MP.send({ kind: 'unmortgage', spaceId: sid }); },
+    /* Same signatures as Game's, which take just the space: the screen calls
+       these exactly as it calls the real ones. */
+    buildHouse:       function (sid) { MP.send({ kind: 'build', spaceId: sid }); },
+    sellHouse:        function (sid) { MP.send({ kind: 'sell', spaceId: sid }); },
+    mortgageProperty: function (sid) { MP.send({ kind: 'mortgage', spaceId: sid }); },
+    unmortgageProperty: function (sid) { MP.send({ kind: 'unmortgage', spaceId: sid }); },
     endLandAction: function () {},
     resolveDebt: function () {},
     forceSettleDebt: function () {},
@@ -188,18 +196,22 @@ MP.applyIntent = function (seatId, intent, game) {
       if (game.phase !== 'action' && game.phase !== 'rolled') return false;
       game.endTurn();
       return true;
+    /* Game's property methods take only the space and act for the player whose
+       turn it is (checked above). Passing the seat first made them act on the
+       square numbered like the seat. */
     case 'build':
-      game.buildHouse(seatId, intent.spaceId);
-      return true;
     case 'sell':
-      game.sellHouse(seatId, intent.spaceId);
-      return true;
     case 'mortgage':
-      game.mortgageProperty(seatId, intent.spaceId);
+    case 'unmortgage': {
+      var sid = intent.spaceId;
+      var prop = game.state && game.state.properties && game.state.properties[sid];
+      if (!Number.isInteger(sid) || !prop || prop.owner !== seatId) return false;
+      if (intent.kind === 'build') game.buildHouse(sid);
+      else if (intent.kind === 'sell') game.sellHouse(sid);
+      else if (intent.kind === 'mortgage') game.mortgageProperty(sid);
+      else game.unmortgageProperty(sid);
       return true;
-    case 'unmortgage':
-      game.unmortgageProperty(seatId, intent.spaceId);
-      return true;
+    }
     default:
       return false;
   }

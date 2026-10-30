@@ -231,6 +231,14 @@ class AIPlayer {
     const actions = [];
     let available = player.money;
 
+    // Plan against a copy of the buildings, so each planned sale sees the ones
+    // before it. Planning against the live board, which does not change until
+    // the plan runs, queued the same house for sale again and again: the plan
+    // counted money that never came and stopped short of mortgaging, and the
+    // AI went bankrupt with property it could still have mortgaged.
+    const sim = { ...game.state, properties: {} };
+    for (const [id, p] of Object.entries(game.state.properties)) sim.properties[id] = { ...p };
+
     // First: sell buildings (most liquid)
     const withBuildings = player.properties
       .filter(id => (game.state.properties[id]?.houses || 0) > 0)
@@ -242,14 +250,18 @@ class AIPlayer {
         return (game.state.properties[b]?.houses || 0) - (game.state.properties[a]?.houses || 0);
       });
 
-    for (const id of withBuildings) {
-      if (available >= amountNeeded) break;
-      while ((game.state.properties[id]?.houses || 0) > 0 &&
-             canSellHouse(this.playerId, id, game.state) &&
-             available < amountNeeded) {
-        const value = Math.floor((BOARD_SPACES[id].housePrice || 0) / 2);
-        actions.push({ action: 'sell', spaceId: id });
-        available += value;
+    // Round and round the list, since selling evenly means one house from
+    // each property in a group before a second from any of them.
+    for (let sold = true; sold && available < amountNeeded; ) {
+      sold = false;
+      for (const id of withBuildings) {
+        if (available >= amountNeeded) break;
+        if ((sim.properties[id]?.houses || 0) > 0 && canSellHouse(this.playerId, id, sim)) {
+          actions.push({ action: 'sell', spaceId: id });
+          available += Math.floor((BOARD_SPACES[id].housePrice || 0) / 2);
+          sim.properties[id].houses--;
+          sold = true;
+        }
       }
     }
 
@@ -257,7 +269,7 @@ class AIPlayer {
     if (available < amountNeeded) {
       const mortgageable = player.properties
         .filter(id => {
-          const prop = game.state.properties[id];
+          const prop = sim.properties[id];
           return !prop.mortgaged && (prop.houses || 0) === 0;
         })
         .sort((a, b) => {
