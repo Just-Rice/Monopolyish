@@ -34,18 +34,19 @@ function fakeGame() {
     rolled: 0, ended: 0, built: [],
     players: [
       { id:0, name:'Ada',  token:'🎩', color:'#e74c3c', money:1500, position:0,
-        inJail:false, jailTurns:0, getOutOfJailCards:0, bankrupt:false, isAI:false },
+        inJail:false, jailTurns:0, jailCards:[], properties:[5], bankrupt:false, isAI:false },
       { id:1, name:'Brei', token:'🚗', color:'#3498db', money:1320, position:12,
-        inJail:true, jailTurns:1, getOutOfJailCards:1, bankrupt:false, isAI:false }
+        inJail:true, jailTurns:1, jailCards:[{ deckType:'chance' }], properties:[1], bankrupt:false, isAI:false }
     ],
     state: {
-      properties: [ { owner:-1, houses:0, mortgaged:false },
-                    { owner:1, houses:3, mortgaged:false } ],
+      properties: { 0: { owner:-1, houses:0, mortgaged:false },
+                    1: { owner:1, houses:3, mortgaged:false },
+                    5: { owner:0, houses:0, mortgaged:false } },
       freeParkingPot: 250, housesAvailable: 29, hotelsAvailable: 12
     },
     handleRoll: function () { this.rolled++; this.phase = 'action'; },
     endTurn:    function () { this.ended++; this.currentPlayer = 1; this.phase = 'roll'; },
-    buildHouse: function (p, s) { this.built.push([p, s]); }
+    buildHouse: function (s) { this.built.push(s); }
   };
 }
 
@@ -69,6 +70,9 @@ check('jail state survives', snap.players[1].inJail === true);
 check('property ownership and houses survive',
       snap.properties[1].owner === 1 && snap.properties[1].houses === 3,
       JSON.stringify(snap.properties[1]));
+check('each player\'s deeds and jail cards survive, for the guest\'s panels',
+      snap.players[0].properties[0] === 5 && snap.players[1].jailCards.length === 1 &&
+      snap.players[1].jailCards[0].deckType === 'chance', JSON.stringify(snap.players));
 check('the pot and the bank survive',
       snap.freeParkingPot === 250 && snap.housesAvailable === 29);
 check('whose turn it is survives', snap.currentPlayer === 0 && snap.phase === 'roll');
@@ -86,7 +90,7 @@ check('a null game gives a null snapshot', MP.snapshot(null) === null);
 MP.mode = 'guest'; MP.mySeat = 0;
 var mirror = MP.buildMirror(snap);
 check('the mirror exposes what the UI reads',
-      mirror.players.length === 2 && mirror.state.properties.length === 2 &&
+      mirror.players.length === 2 && mirror.state.properties[1].houses === 3 &&
       typeof mirror.canRoll === 'function' && typeof mirror.canEndTurn === 'function');
 check('the seated guest may roll on their own turn', mirror.canRoll() === true);
 
@@ -121,7 +125,18 @@ check('ending your own turn is applied',
 game = fakeGame();
 check('building routes through with its space id',
       MP.applyIntent(0, { kind: 'build', spaceId: 5 }, game) === true &&
-      game.built[0][1] === 5, JSON.stringify(game.built));
+      game.built.length === 1 && game.built[0] === 5, JSON.stringify(game.built));
+game = fakeGame();
+check('building on a square you do not own is refused',
+      MP.applyIntent(0, { kind: 'build', spaceId: 1 }, game) === false &&
+      MP.applyIntent(0, { kind: 'build' }, game) === false && game.built.length === 0,
+      JSON.stringify(game.built));
+var sent = [];
+MP.mode = 'guest'; MP.guest = { sendIntent: function (i) { sent.push(i); } };
+MP.buildMirror(fakeGame()).sellHouse(5);
+MP.mode = 'local'; MP.guest = null;
+check('a guest selling sends the space it picked', sent.length === 1 && sent[0].kind === 'sell' && sent[0].spaceId === 5,
+      JSON.stringify(sent));
 check('an unknown intent is refused',
       MP.applyIntent(0, { kind: 'nonsense' }, game) === false);
 check('an empty intent is refused', MP.applyIntent(0, null, game) === false);

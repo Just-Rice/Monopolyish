@@ -172,7 +172,9 @@ class Game {
     }
 
     // Wait for any async landing effects (cards, etc.)
-    await this._waitForPhase(['action', 'rolled', 'debt'], 5000);
+    // 'roll' too: after doubles the landing ends there, and leaving it out sat
+    // the computer still for the full five seconds before its next roll.
+    await this._waitForPhase(['action', 'rolled', 'debt', 'roll'], 5000);
 
     // Handle debt if AI needs to raise funds
     if (this.phase === 'debt' && this._pendingDebt) {
@@ -207,25 +209,34 @@ class Game {
   }
 
   async _aiRaiseFunds() {
-    const ai = this.getAI(this._pendingDebt.playerId);
+    const debt = this._pendingDebt;
+    // The debtor's own raising may already be under way (a computer player can
+    // owe money on another computer player's turn); doing it twice oversells.
+    if (!debt || this._aiRaisingFor === debt) return;
+    const ai = this.getAI(debt.playerId);
     if (!ai) return;
-
-    const actions = ai.decideRaiseFunds(this._pendingDebt.amount, this);
-    for (const act of actions) {
-      if (act.action === 'sell') {
-        this.sellHouse(act.spaceId);
-      } else if (act.action === 'mortgage') {
-        this.mortgageProperty(act.spaceId);
+    this._aiRaisingFor = debt;
+    try {
+      const actions = ai.decideRaiseFunds(debt.amount, this);
+      for (const act of actions) {
+        if (act.action === 'sell') {
+          this.sellHouse(act.spaceId);
+        } else if (act.action === 'mortgage') {
+          this.mortgageProperty(act.spaceId);
+        }
+        await this._wait(300);
       }
-      await this._wait(300);
-    }
-    // Try to resolve the debt
-    this.ui.closeModal();
-    this.resolveDebt();
-    // If still can't pay, declare bankruptcy
-    if (this._pendingDebt) {
+      // Try to resolve the debt
       this.ui.closeModal();
-      this.forceSettleDebt();
+      this.resolveDebt();
+      // If still can't pay, declare bankruptcy. Only for this debt: paying it
+      // may already have opened the next one in the queue, someone else's.
+      if (this._pendingDebt === debt) {
+        this.ui.closeModal();
+        this.forceSettleDebt();
+      }
+    } finally {
+      if (this._aiRaisingFor === debt) this._aiRaisingFor = null;
     }
   }
 
@@ -293,6 +304,9 @@ class Game {
       player.jailTurns = 0;
       this.ui.showToast(`${player.name} rolled doubles and is free from Jail!`, 'success');
       this.ui.addGameLog(`🔓 ${player.name} escaped jail with doubles!`);
+      // Doubles out of jail move you, but do not earn another roll.
+      this.lastRoll = { ...result, doubles: false };
+      this.doublesCount = 0;
       await this.movePlayer(this.currentPlayer, result.total);
     } else {
       player.jailTurns++;
@@ -404,7 +418,7 @@ class Game {
     switch (space.type) {
       case 'go':
         // Already collected $200 on pass
-        this.phase = this.lastRoll?.doubles ? 'roll' : 'action';
+        this._settlePhase();
         this.ui.updateAll();
         break;
 
@@ -418,7 +432,8 @@ class Game {
         this.ui.showToast(`${player.name} pays ${space.name}: $${space.amount}`, 'warning');
         this.ui.addGameLog(`💸 ${player.name} paid ${space.name}: $${space.amount}`);
         this.payToFreeParkingPot(playerId, space.amount);
-        this.phase = this.lastRoll?.doubles ? 'roll' : 'action';
+        if (player.bankrupt) return;   // the turn has already moved on
+        this._settlePhase();
         this.ui.updateAll();
         break;
 
@@ -437,7 +452,7 @@ class Game {
       case 'jail':
         // Just visiting
         this.ui.showToast(`${player.name} is just visiting Jail.`, 'info');
-        this.phase = this.lastRoll?.doubles ? 'roll' : 'action';
+        this._settlePhase();
         this.ui.updateAll();
         break;
 
@@ -455,12 +470,12 @@ class Game {
         } else {
           this.ui.showToast(`${player.name} rests on Free Parking.`, 'info');
         }
-        this.phase = this.lastRoll?.doubles ? 'roll' : 'action';
+        this._settlePhase();
         this.ui.updateAll();
         break;
 
       default:
-        this.phase = this.lastRoll?.doubles ? 'roll' : 'action';
+        this._settlePhase();
         this.ui.updateAll();
     }
   }
@@ -471,7 +486,7 @@ class Game {
     const player = this.players[playerId];
 
     if (!prop) {
-      this.phase = this.lastRoll?.doubles ? 'roll' : 'action';
+      this._settlePhase();
       this.ui.updateAll();
       return;
     }
@@ -483,7 +498,7 @@ class Game {
         const decision = ai.decideBuy(spaceId, this);
         if (decision === 'buy' && player.money >= space.price) {
           this.purchaseProperty(playerId, spaceId, space.price);
-          this.phase = this.lastRoll?.doubles ? 'roll' : 'action';
+          this._settlePhase();
           this.ui.updateAll();
         } else {
           // AI sends to auction
@@ -497,7 +512,7 @@ class Game {
           // If they cannot pay, the property goes to auction rather than the
           // turn stopping on a purchase that did not happen.
           if (!this.purchaseProperty(playerId, spaceId, space.price)) return doAuction();
-          this.phase = this.lastRoll?.doubles ? 'roll' : 'action';
+          this._settlePhase();
           this.ui.updateAll();
         };
         const doAuction = () => { MP.hostOnlyPrompt('auction bidding'); this.ui.showAuctionModal(spaceId); };
@@ -509,12 +524,12 @@ class Game {
     } else if (prop.owner === playerId) {
       // Own it
       this.ui.showToast(`${player.name} owns ${space.name}.`, 'info');
-      this.phase = this.lastRoll?.doubles ? 'roll' : 'action';
+      this._settlePhase();
       this.ui.updateAll();
     } else if (prop.mortgaged) {
       // Mortgaged - no rent
       this.ui.showToast(`${space.name} is mortgaged. No rent owed.`, 'info');
-      this.phase = this.lastRoll?.doubles ? 'roll' : 'action';
+      this._settlePhase();
       this.ui.updateAll();
     } else {
       // Pay rent
@@ -537,7 +552,7 @@ class Game {
       const actualPaid = this.payRent(playerId, prop.owner, rent);
 
       if (player.bankrupt) return;
-      this.phase = this.lastRoll?.doubles ? 'roll' : 'action';
+      this._settlePhase();
       this.ui.updateAll();
     }
   }
@@ -548,8 +563,11 @@ class Game {
 
     const executeCard = () => {
       card.action(this);
+      // A card that bankrupted whoever drew it has already moved the turn on;
+      // settling the phase now would take the next player's roll away.
+      if (this.players[playerId].bankrupt) { this._pendingLandAction = false; return; }
       if (!this._pendingLandAction) {
-        this.phase = this.lastRoll?.doubles ? 'roll' : 'action';
+        this._settlePhase();
         this.ui.updateAll();
       }
       this._pendingLandAction = false;
@@ -567,9 +585,17 @@ class Game {
     }
   }
 
+  /* Where the turn goes once a landing, card or debt is dealt with: rolling
+     again after doubles, otherwise the action phase. A debt still being raised
+     comes first: overwriting its 'debt' phase let the turn end with it unpaid,
+     and the AI, which only raises funds when it sees that phase, never did. */
+  _settlePhase() {
+    this.phase = this._pendingDebt ? 'debt' : (this.lastRoll?.doubles ? 'roll' : 'action');
+  }
+
   endLandAction() {
     this._pendingLandAction = false;
-    this.phase = this.lastRoll?.doubles ? 'roll' : 'action';
+    this._settlePhase();
     this.ui.updateAll();
   }
 
@@ -580,6 +606,10 @@ class Game {
     player.inJail = true;
     player.jailTurns = 0;
     this.doublesCount = 0;
+    // Jail ends the turn, doubles or not. Left as doubles, a Go to Jail card
+    // drawn after doubles put the turn back to 'roll': a person got a jail roll
+    // straight away, and the computer stopped playing altogether.
+    if (this.lastRoll) this.lastRoll = { ...this.lastRoll, doubles: false };
     this.ui.showToast(`${player.name} is sent to Jail!`, 'error');
     this.ui.addGameLog(`🔒 ${player.name} went to jail!`);
     this.ui.updateBoard();
@@ -588,7 +618,8 @@ class Game {
   }
 
   handleJailOptions() {
-    const player = this.players[this.currentPlayer];
+    const playerId = this.currentPlayer;
+    const player = this.players[playerId];
     // Whoever is in jail answers, wherever they are sitting.
     const payFine = () => {
       this.payMoney(this.currentPlayer, 50, 'Jail fine');
@@ -642,9 +673,7 @@ class Game {
         this.declareBankruptcy(playerId, -1);
       } else {
         // Has enough assets — show raise funds modal
-        this._pendingDebt = { playerId, amount, creditorId: -1, reason };
-        this.phase = 'debt';
-        MP.hostOnlyPrompt('raising funds'); this.ui.showRaiseFundsModal(playerId, amount, -1, reason);
+        this._openDebt({ playerId, amount, creditorId: -1, reason });
       }
     }
   }
@@ -666,10 +695,52 @@ class Game {
         this.declareBankruptcy(payerId, receiverId);
       } else {
         // Has enough assets — show raise funds modal
-        this._pendingDebt = { playerId: payerId, amount, creditorId: receiverId, reason: `Rent to ${receiver.name}` };
-        this.phase = 'debt';
-        MP.hostOnlyPrompt('raising funds'); this.ui.showRaiseFundsModal(payerId, amount, receiverId, `Rent to ${receiver.name}`);
+        this._openDebt({ playerId: payerId, amount, creditorId: receiverId, reason: `Rent to ${receiver.name}` });
       }
+    }
+  }
+
+  /* Starts raising funds for a debt. "Collect from every player" cards can
+     leave several players short at once; each used to overwrite the one before,
+     so every debt but the last was simply forgotten. They now wait their turn.
+     A computer player who owes money on someone else's turn raises it itself,
+     since its own turn loop is not running to do it. */
+  _openDebt(debt) {
+    if (this._pendingDebt) {
+      (this._debtQueue = this._debtQueue || []).push(debt);
+      return;
+    }
+    this._pendingDebt = debt;
+    this.phase = 'debt';
+    MP.hostOnlyPrompt('raising funds'); this.ui.showRaiseFundsModal(debt.playerId, debt.amount, debt.creditorId, debt.reason);
+    if (debt.playerId !== this.currentPlayer && this.getAI(debt.playerId)) this._aiRaiseFunds();
+  }
+
+  /* The debt in hand is settled, paid or by bankruptcy: on to the next one
+     waiting, or back to the turn. */
+  _debtSettled() {
+    this._pendingDebt = null;
+    const queue = this._debtQueue || [];
+    while (queue.length) {
+      const next = queue.shift();
+      const debtor = this.players[next.playerId];
+      if (debtor.bankrupt) continue;
+      if (debtor.money >= next.amount) {
+        // Since the debt was run up they have found the money: just pay it.
+        debtor.money -= next.amount;
+        if (next.creditorId >= 0) this.players[next.creditorId].money += next.amount;
+        else if (this.useFreeParkingPot) this.state.freeParkingPot += next.amount;
+        continue;
+      }
+      this._openDebt(next);
+      return;
+    }
+    this._settlePhase();
+    this.ui.updateAll();
+    // A computer player whose turn stopped to wait on somebody else's debt
+    // picks it up again; its own debts are finished by its own turn loop.
+    if (this.isCurrentPlayerAI() && !this._aiRunning && !this.players[this.currentPlayer].bankrupt) {
+      setTimeout(() => this.runAITurn(), 800);
     }
   }
 
@@ -687,10 +758,8 @@ class Game {
       } else if (this.useFreeParkingPot) {
         this.state.freeParkingPot += amount;
       }
-      this._pendingDebt = null;
-      this.phase = this.lastRoll?.doubles ? 'roll' : 'action';
       this.ui.showToast(`${player.name} paid the debt of $${amount}!`, 'success');
-      this.ui.updateAll();
+      this._debtSettled();
     } else {
       // Still can't afford — keep the modal open
       this.ui.showToast(`Still need $${amount - player.money} more!`, 'warning');
@@ -701,8 +770,12 @@ class Game {
   forceSettleDebt() {
     if (!this._pendingDebt) return;
     const { playerId, creditorId } = this._pendingDebt;
-    this._pendingDebt = null;
+    const onTheirTurn = playerId === this.currentPlayer;
     this.declareBankruptcy(playerId, creditorId);
+    // Their own turn has been handed on; someone else's carries on, starting
+    // with the next debt if there is one.
+    if (!onTheirTurn && this.players.filter(p => !p.bankrupt).length > 1) this._debtSettled();
+    else this._pendingDebt = null;
   }
 
   payToFreeParkingPot(playerId, amount) {
@@ -718,9 +791,7 @@ class Game {
       if (player.money + this.getMaxLiquidValue(playerId) < amount) {
         this.declareBankruptcy(playerId, -1);
       } else {
-        this._pendingDebt = { playerId, amount, creditorId: -1, reason: 'Tax payment' };
-        this.phase = 'debt';
-        MP.hostOnlyPrompt('raising funds'); this.ui.showRaiseFundsModal(playerId, amount, -1, 'Tax payment');
+        this._openDebt({ playerId, amount, creditorId: -1, reason: 'Tax payment' });
       }
     }
   }
@@ -801,14 +872,19 @@ class Game {
     this.ui.updateAll();
   }
 
+  /* Selling and mortgaging are done for whoever owns the property. That is
+     usually the player whose turn it is, but not when someone raises funds on
+     another player's turn: then these sold nothing, or paid the mortgage money
+     to the wrong player. */
   sellHouse(spaceId) {
-    if (!canSellHouse(this.currentPlayer, spaceId, this.state)) {
+    const prop = this.state.properties[spaceId];
+    const ownerId = prop ? prop.owner : null;
+    if (ownerId === null || ownerId < 0 || !canSellHouse(ownerId, spaceId, this.state)) {
       this.ui.showToast('Cannot sell here!', 'error');
       return;
     }
     const space = BOARD_SPACES[spaceId];
-    const player = this.players[this.currentPlayer];
-    const prop = this.state.properties[spaceId];
+    const player = this.players[ownerId];
     const value = Math.floor((space.housePrice || 0) / 2);
 
     if (prop.houses === 5) {
@@ -839,9 +915,9 @@ class Game {
   mortgageProperty(spaceId) {
     const space = BOARD_SPACES[spaceId];
     const prop = this.state.properties[spaceId];
-    const player = this.players[this.currentPlayer];
+    const player = prop && prop.owner !== null && prop.owner >= 0 ? this.players[prop.owner] : null;
 
-    if (prop.mortgaged || (prop.houses || 0) > 0) {
+    if (!player || prop.mortgaged || (prop.houses || 0) > 0) {
       this.ui.showToast('Cannot mortgage this property!', 'error');
       return;
     }
@@ -1036,7 +1112,15 @@ class Game {
       return;
     }
 
-    this.nextTurn();
+    // Going broke on someone else's turn (their birthday, say) is no reason
+    // for that turn to end. Only the player whose turn it is hands it on.
+    if (playerId === this.currentPlayer) {
+      this._pendingDebt = null;
+      this._debtQueue = [];
+      this.nextTurn();
+    } else {
+      this.ui.updateAll();
+    }
   }
 
   // ── Turn Management ──────────────────────────────────────
